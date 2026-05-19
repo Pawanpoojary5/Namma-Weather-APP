@@ -15,6 +15,7 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.weatherforecast"
+
     defaultConfig {
         applicationId "com.weatherforecast"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -22,7 +23,7 @@ android {
         versionCode 1
         versionName "1.0"
     }
-    
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -30,6 +31,7 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+
         release {
             storeFile file('debug.keystore')
             storePassword 'android'
@@ -37,11 +39,12 @@ android {
             keyPassword 'android'
         }
     }
-    
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
+
         release {
             signingConfig signingConfigs.release
             minifyEnabled true
@@ -58,16 +61,5 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-
-        maven {
-            url "$rootDir/../node_modules/@react-native-async-storage/async-storage/android/local_repo"
-        }
     }
 }

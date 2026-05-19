@@ -1,6 +1,37 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+
+plugins {
+    id("com.facebook.react.settings")
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+
+    repositories {
+        google()
+        mavenCentral()
+
+        maven {
+            url = uri("$rootDir/../node_modules/@notifee/react-native/android/libs")
+        }
+
+        maven {
+            url = uri("$rootDir/../node_modules/@react-native-async-storage/async-storage/android/local_repo")
+        }
+
+        maven {
+            url = uri("https://www.jitpack.io")
+        }
+    }
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand()
+}
+
 rootProject.name = 'weatherforecast'
+
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

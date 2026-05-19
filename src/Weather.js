@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Linking,
   PermissionsAndroid,
   Platform,
@@ -21,6 +22,7 @@ import notifee, { AndroidImportance, TriggerType } from '@notifee/react-native';
 const WEATHER_CACHE_KEY = 'wx:weather';
 const COORDS_CACHE_KEY = 'wx:coords';
 const RAIN_START_TIME_KEY = 'wx:rain_start_time';
+const RAIN_NOTIFICATION_STATE_KEY = 'wx:rain_notification_state';
 
 const RAIN_ALERT_NOTIFICATION_ID = 'namma-weather-rain-alert';
 const RAIN_ALERT_CHANNEL_ID = 'weather-alerts';
@@ -31,35 +33,40 @@ const MIN_REAL_RAIN_MM = 0.3;
 
 const WMO_MAP = {
   0: { label: 'Dombu', emoji: '☀️', art: 'sunny' },
-  1: { label: 'Onthe Dombu', emoji: '🌤️', art: 'sunny' },
+  1: { label: 'Kammi Dombu (Modda)', emoji: '🌤️', art: 'sunny' },
   2: { label: 'Onthe Mugal', emoji: '⛅', art: 'cloudy' },
   3: { label: 'Modda', emoji: '☁️', art: 'cloudy' },
   45: { label: 'Maindu', emoji: '🌫️', art: 'fog' },
   48: { label: 'Maindu', emoji: '🌫️', art: 'fog' },
-  51: { label: 'Pani Dombu Barsa', emoji: '🌦️', art: 'rain' },
+
+  51: { label: 'Churu Dombu Barsa', emoji: '🌦️', art: 'rain' },
   53: { label: 'Dombu Barsa', emoji: '🌦️', art: 'rain' },
-  55: { label: 'Pani Barsa', emoji: '🌧️', art: 'rain' },
-  56: { label: 'Chimma Barsa', emoji: '🌧️', art: 'rain' },
-  57: { label: 'Chimma Pani Barsa', emoji: '🌧️', art: 'rain' },
-  61: { label: 'Onthe Barsa', emoji: '🌧️', art: 'rain' },
+  55: { label: 'Joru Dombu Barsa', emoji: '🌧️', art: 'rain' },
+  56: { label: 'Chali DombuBarsa', emoji: '🌧️', art: 'rain' },
+  57: { label: 'Jor Chali Dombu Barsa', emoji: '🌧️', art: 'rain' },
+
+  61: { label: 'Panit Barsa', emoji: '🌧️', art: 'rain' },
   63: { label: 'Barsa', emoji: '🌧️', art: 'rain' },
   65: { label: 'Bolla Barsa', emoji: '🌧️', art: 'rain' },
   66: { label: 'Chali Barsa', emoji: '🌧️', art: 'rain' },
-  67: { label: 'Chali Barsa', emoji: '🌧️', art: 'rain' },
+  67: { label: 'Masth Chali Barsa', emoji: '🌧️', art: 'rain' },
+
   71: { label: 'Panit Ice', emoji: '🌨️', art: 'snow' },
   73: { label: 'Hima', emoji: '🌨️', art: 'snow' },
   75: { label: 'Joru Hima', emoji: '❄️', art: 'snow' },
   77: { label: 'Chimma Hima', emoji: '❄️', art: 'snow' },
-  80: { label: 'Barsa Barpundu', emoji: '🌦️', art: 'rain' },
-  81: { label: 'Barsa Barpundu', emoji: '🌦️', art: 'rain' },
-  82: { label: 'Joru Barsa Barpundu', emoji: '⛈️', art: 'storm' },
+
+  80: { label: 'Onthe barsa barpund', emoji: '🌦️', art: 'rain' },
+  81: { label: 'Barsa Barondhu undu', emoji: '🌦️', art: 'rain' },
+  82: { label: 'Joru Barsa Barondhu undu', emoji: '⛈️', art: 'storm' },
+
   85: { label: 'Chimma Barsa', emoji: '🌨️', art: 'snow' },
   86: { label: 'Masth Chimma Barsa', emoji: '🌨️', art: 'snow' },
-  95: { label: 'Tedil Boka Barsa', emoji: '⛈️', art: 'storm' },
-  96: { label: 'Tedil Boka Barsa', emoji: '⛈️', art: 'storm' },
-  99: { label: 'Tedil Boka Barsa', emoji: '⛈️', art: 'storm' },
-};
 
+  95: { label: 'Tedil Boka Barsa', emoji: '⛈️', art: 'storm' },
+  96: { label: 'Tedil Boka onthe Barsa', emoji: '⛈️', art: 'storm' },
+  99: { label: 'Tedil Boka Joru Barsa', emoji: '⛈️', art: 'storm' },
+};
 const RAIN_CODES = [
   51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 85, 86, 95, 96, 99,
 ];
@@ -83,7 +90,9 @@ const isActualRainNow = (code, rainAmount) =>
 const isRealFutureRain = item => {
   const chance = Number(item.rainChance ?? 0);
   const precipMm = Number(item.precipMm ?? 0);
-  return chance >= 80 && hasRealRain(precipMm);
+  const codeRain = isRainCode(item.code);
+
+  return chance >= 70 || precipMm >= 0.2 || codeRain;
 };
 
 const getWeatherInfo = code =>
@@ -95,6 +104,17 @@ const getSafeWeatherInfo = (code, rainAmount = 0) => {
   }
 
   return getWeatherInfo(code);
+};
+
+const getHourlyWeatherInfo = item => {
+  const chance = Number(item.rainChance ?? 0);
+  const precipMm = Number(item.precipMm ?? 0);
+
+  if (chance >= 70 || precipMm >= 0.2 || isRainCode(item.code)) {
+    return getWeatherInfo(item.code);
+  }
+
+  return getSafeWeatherInfo(item.code, precipMm);
 };
 
 const toClockTime = ts =>
@@ -184,9 +204,9 @@ const getAQIInfo = value => {
   if (n === null) {
     return {
       value: '--',
-      label: 'Data Ijji',
+      label: 'Unavailable',
       color: '#8A9BB0',
-      message: 'AQI data iga ijji',
+      message: 'AQI data not available now',
     };
   }
 
@@ -195,53 +215,53 @@ const getAQIInfo = value => {
   if (aqi <= 50) {
     return {
       value: aqi,
-      label: 'Chennag Undu',
+      label: 'Good',
       color: '#4DFFB4',
-      message: 'Gaali chennag undu',
+      message: 'Air quality is healthy',
     };
   }
 
   if (aqi <= 100) {
     return {
       value: aqi,
-      label: 'Madhyama',
+      label: 'Moderate',
       color: '#FFD166',
-      message: 'Gaali normal undu',
+      message: 'Acceptable air quality',
     };
   }
 
   if (aqi <= 150) {
     return {
       value: aqi,
-      label: 'Care Beku',
+      label: 'Sensitive',
       color: '#FFB347',
-      message: 'Sensitive janak care beku',
+      message: 'Sensitive people be careful',
     };
   }
 
   if (aqi <= 200) {
     return {
       value: aqi,
-      label: 'Sari Ijji',
+      label: 'Unhealthy',
       color: '#FF6B6B',
-      message: 'Horag jasti time beda',
+      message: 'Avoid long outdoor activity',
     };
   }
 
   if (aqi <= 300) {
     return {
       value: aqi,
-      label: 'Masth Sari Ijji',
+      label: 'Very Unhealthy',
       color: '#C084FC',
-      message: 'Horag hogod kammi malpu',
+      message: 'Outdoor activity not recommended',
     };
   }
 
   return {
     value: aqi,
-    label: 'Danger',
+    label: 'Hazardous',
     color: '#FF4D6D',
-    message: 'Avaand maned ulle ippu',
+    message: 'Stay indoors if possible',
   };
 };
 
@@ -251,9 +271,9 @@ const getUVInfo = value => {
   if (n === null) {
     return {
       value: '--',
-      label: 'Data Ijji',
+      label: 'Unavailable',
       color: '#8A9BB0',
-      message: 'UV data iga ijji',
+      message: 'UV data not available now',
     };
   }
 
@@ -262,36 +282,36 @@ const getUVInfo = value => {
   if (uv <= 2) {
     return {
       value: uv,
-      label: 'Kammi',
+      label: 'Low',
       color: '#4DFFB4',
-      message: 'Normal horag time safe undu',
+      message: 'Safe for normal outdoor time',
     };
   }
 
   if (uv <= 5) {
     return {
       value: uv,
-      label: 'Madhyama',
+      label: 'Moderate',
       color: '#FFD166',
-      message: 'Horag jasti time idre sunscreen use malpu',
+      message: 'Use sunscreen if outside longer',
     };
   }
 
   if (uv <= 7) {
     return {
       value: uv,
-      label: 'Jasti',
+      label: 'High',
       color: '#FFB347',
-      message: 'Sunscreen matte sunglass use malpu',
+      message: 'Use sunscreen and sunglasses',
     };
   }
 
   if (uv <= 10) {
     return {
       value: uv,
-      label: 'Masth Jasti',
+      label: 'Very High',
       color: '#FF6B6B',
-      message: 'Madhyana direct bisil beda',
+      message: 'Avoid direct afternoon sun',
     };
   }
 
@@ -299,13 +319,11 @@ const getUVInfo = value => {
     value: uv,
     label: 'Extreme',
     color: '#FF4D6D',
-    message: 'Shade d ippuna try malpu',
+    message: 'Stay shaded as much as possible',
   };
 };
 
 const createWeatherNotificationChannel = async () => {
-  await notifee.requestPermission();
-
   if (Platform.OS === 'android') {
     return notifee.createChannel({
       id: RAIN_ALERT_CHANNEL_ID,
@@ -341,6 +359,33 @@ const findRainStopSlot = hourlyList => {
 };
 
 const buildRainStopLabel = stopTime => {
+  if (!stopTime) return 'Rain may continue today';
+
+  const now = Date.now();
+  const stopMs = Number(stopTime);
+  const diffMs = stopMs - now;
+
+  if (diffMs <= 0) return 'Stops soon';
+
+  const minutes = Math.max(1, Math.round(diffMs / 60000));
+
+  if (minutes <= 5) return `Stops in ~${minutes} min`;
+
+  if (minutes < 60) {
+    const rounded = Math.max(5, Math.round(minutes / 5) * 5);
+    return `Stops in ~${rounded} min`;
+  }
+
+  const hours = Math.round(minutes / 60);
+
+  if (hours <= 1) return 'Stops in ~1 hr';
+  if (hours <= 2) return 'Stops in ~2 hrs';
+  if (hours <= 3) return `Stops in ~${hours} hrs`;
+
+  return `Stops around ${toClockTime(stopMs)}`;
+};
+
+const buildRainStopNotificationLabel = stopTime => {
   if (!stopTime) return 'Eni Barsa Borondhu Ippundu';
 
   const now = Date.now();
@@ -388,8 +433,15 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
     };
   }
 
-  const firstRainSlot = hourlyList.find((item, index) => {
-    if (index === 0) return false;
+  const now = Date.now();
+
+  const firstRainSlot = hourlyList.find(item => {
+    const itemTime = new Date(item.time).getTime();
+
+    if (itemTime <= now + 5 * 60 * 1000) {
+      return false;
+    }
+
     return isRealFutureRain(item);
   });
 
@@ -432,13 +484,26 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
 
 const syncRainNotification = async weatherPayload => {
   try {
-    if (!weatherPayload?.hourlyList?.length) return;
+    if (!weatherPayload?.hourlyList?.length || !weatherPayload?.current) return;
 
     const rainPrediction = predictRain(
       weatherPayload.hourlyList,
       weatherPayload.current.weather_code,
       weatherPayload.currentRain,
     );
+
+    const previousStateRaw = await AsyncStorage.getItem(
+      RAIN_NOTIFICATION_STATE_KEY,
+    );
+
+    const previousState = previousStateRaw ? JSON.parse(previousStateRaw) : {};
+
+    if (rainPrediction.state === 'no_rain') {
+      await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
+      await AsyncStorage.removeItem(RAIN_NOTIFICATION_STATE_KEY);
+      await cancelRainNotification();
+      return;
+    }
 
     if (rainPrediction.state === 'raining_now') {
       let storedStartTime = await AsyncStorage.getItem(RAIN_START_TIME_KEY);
@@ -448,12 +513,28 @@ const syncRainNotification = async weatherPayload => {
         await AsyncStorage.setItem(RAIN_START_TIME_KEY, storedStartTime);
       }
 
+      const currentBody =
+        buildRainStopNotificationLabel(rainPrediction.stopTime) ||
+        'Rain is active now';
+
+      const alreadyShown =
+        previousState.type === 'raining_now' &&
+        previousState.body === currentBody;
+
+      if (alreadyShown) {
+        return;
+      }
+
+      if (typeof notifee.cancelTriggerNotification === 'function') {
+        await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
+      }
+
       const channelId = await createWeatherNotificationChannel();
 
       await notifee.displayNotification({
         id: RAIN_ALERT_NOTIFICATION_ID,
         title: '🌧️ Barsa Barondu Undu',
-        body: rainPrediction.stopTimeLabel || 'Rain is active now',
+        body: currentBody,
         android: {
           channelId,
           color: '#6CD9FF',
@@ -463,40 +544,96 @@ const syncRainNotification = async weatherPayload => {
         },
       });
 
+      await AsyncStorage.setItem(
+        RAIN_NOTIFICATION_STATE_KEY,
+        JSON.stringify({
+          type: 'raining_now',
+          body: currentBody,
+          shownAt: Date.now(),
+        }),
+      );
+
       return;
     }
 
-    await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
-    await cancelRainNotification();
+    if (rainPrediction.state === 'rain_coming' && rainPrediction.startTime) {
+      await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
 
-    if (rainPrediction.state !== 'rain_coming' || !rainPrediction.startTime) {
-      return;
-    }
+      const notifyAt = rainPrediction.startTime - 30 * 60 * 1000;
 
-    const notifyAt = rainPrediction.startTime - 30 * 60 * 1000;
+      const notificationBody = `Barsa ola shuru  avu  ${rainPrediction.startTimeLabel} Ganteg.RainCoat ejanda kodde pathonle.`;
 
-    if (notifyAt <= Date.now() + 60 * 1000) return;
+      const alreadyScheduled =
+        previousState.type === 'rain_coming' &&
+        previousState.notifyAt === notifyAt &&
+        previousState.body === notificationBody;
 
-    const channelId = await createWeatherNotificationChannel();
+      if (alreadyScheduled) {
+        return;
+      }
 
-    await notifee.createTriggerNotification(
-      {
-        id: RAIN_ALERT_NOTIFICATION_ID,
-        title: 'Barsa Jagrathe 🌧️',
-        body: `Barsa ola shuru  avu  ${rainPrediction.startTimeLabel} Ganteg.RainCoat ejanda kodde pathonle.`,
-        android: {
-          channelId,
-          color: '#6CD9FF',
-          pressAction: {
-            id: 'default',
+      if (typeof notifee.cancelTriggerNotification === 'function') {
+        await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
+      }
+
+      const channelId = await createWeatherNotificationChannel();
+
+      if (notifyAt <= Date.now() + 60 * 1000) {
+        await notifee.displayNotification({
+          id: RAIN_ALERT_NOTIFICATION_ID,
+          title: 'Barsa Jagrathe 🌧️',
+          body: notificationBody,
+          android: {
+            channelId,
+            color: '#6CD9FF',
+            pressAction: {
+              id: 'default',
+            },
+          },
+        });
+
+        await AsyncStorage.setItem(
+          RAIN_NOTIFICATION_STATE_KEY,
+          JSON.stringify({
+            type: 'rain_coming',
+            notifyAt,
+            body: notificationBody,
+            shownAt: Date.now(),
+          }),
+        );
+
+        return;
+      }
+
+      await notifee.createTriggerNotification(
+        {
+          id: RAIN_ALERT_NOTIFICATION_ID,
+          title: 'Barsa Jagrathe 🌧️',
+          body: notificationBody,
+          android: {
+            channelId,
+            color: '#6CD9FF',
+            pressAction: {
+              id: 'default',
+            },
           },
         },
-      },
-      {
-        type: TriggerType.TIMESTAMP,
-        timestamp: notifyAt,
-      },
-    );
+        {
+          type: TriggerType.TIMESTAMP,
+          timestamp: notifyAt,
+        },
+      );
+
+      await AsyncStorage.setItem(
+        RAIN_NOTIFICATION_STATE_KEY,
+        JSON.stringify({
+          type: 'rain_coming',
+          notifyAt,
+          body: notificationBody,
+          scheduledAt: Date.now(),
+        }),
+      );
+    }
   } catch {
     // Notification failure should not break weather loading.
   }
@@ -622,7 +759,7 @@ const RainTimerCard = ({ prediction, accent }) => {
           <View style={st.rainTimerBlock}>
             <Text style={st.rainTimerIcon}>🌧️</Text>
             <Text style={[st.rainTimerLabel, { color: accent }]}>
-              Barsa Barondhu Undu
+              Rain is active
             </Text>
             <Text style={st.rainTimerClock}>{toClockTime(Date.now())}</Text>
           </View>
@@ -631,14 +768,14 @@ const RainTimerCard = ({ prediction, accent }) => {
 
           <View style={st.rainTimerBlock}>
             <Text style={st.rainTimerIcon}>🌤️</Text>
-            <Text style={st.rainTimerLabel}>Barsa Untundu</Text>
+            <Text style={st.rainTimerLabel}>Clears up</Text>
             <Text
               style={[st.rainTimerClock, st.rainTimerClockSmall]}
               numberOfLines={2}
               adjustsFontSizeToFit
               minimumFontScale={0.78}
             >
-              {prediction.stopTimeLabel || 'Poora dina'}
+              {prediction.stopTimeLabel || 'All day'}
             </Text>
           </View>
         </View>
@@ -651,7 +788,7 @@ const RainTimerCard = ({ prediction, accent }) => {
       <View style={st.rainCardRow}>
         <View style={st.rainTimerBlock}>
           <Text style={st.rainTimerIcon}>🕐</Text>
-          <Text style={st.rainTimerLabel}>Barsa Shuru</Text>
+          <Text style={st.rainTimerLabel}>Rain starts</Text>
           <Text style={[st.rainTimerClock, { color: accent }]}>
             {prediction.startTimeLabel}
           </Text>
@@ -661,7 +798,7 @@ const RainTimerCard = ({ prediction, accent }) => {
 
         <View style={st.rainTimerBlock}>
           <Text style={st.rainTimerIcon}>☀️</Text>
-          <Text style={st.rainTimerLabel}>Barsa Untunda ?</Text>
+          <Text style={st.rainTimerLabel}>Clears up</Text>
           <Text
             style={[st.rainTimerClock, st.rainTimerClockSmall]}
             numberOfLines={2}
@@ -675,7 +812,7 @@ const RainTimerCard = ({ prediction, accent }) => {
 
       {prediction.chance > 0 && (
         <Text style={st.rainChanceLabel}>
-          {prediction.chance}% barsa chance
+          {prediction.chance}% chance of rain
         </Text>
       )}
     </View>
@@ -689,6 +826,18 @@ const requestLocationPermission = async () => {
   }
 
   try {
+    const fineGranted = await PermissionsAndroid.check(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    );
+
+    const coarseGranted = await PermissionsAndroid.check(
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+    );
+
+    if (fineGranted || coarseGranted) {
+      return true;
+    }
+
     const result = await PermissionsAndroid.requestMultiple([
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
@@ -707,21 +856,56 @@ const requestLocationPermission = async () => {
 
 const getCurrentLocation = () =>
   new Promise((resolve, reject) => {
+    let finished = false;
+
+    const finishSuccess = position => {
+      if (finished) return;
+      finished = true;
+      resolve(position);
+    };
+
+    const finishError = error => {
+      if (finished) return;
+      finished = true;
+      reject(error);
+    };
+
+    const hardTimeout = setTimeout(() => {
+      finishError({
+        code: 3,
+        message: 'Location request timed out',
+      });
+    }, 15000);
+
     Geolocation.getCurrentPosition(
-      resolve,
-      () =>
-        Geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 20000,
-          maximumAge: 0,
-          forceRequestLocation: true,
-          showLocationDialog: true,
-        }),
+      position => {
+        clearTimeout(hardTimeout);
+        finishSuccess(position);
+      },
+      firstError => {
+        Geolocation.getCurrentPosition(
+          position => {
+            clearTimeout(hardTimeout);
+            finishSuccess(position);
+          },
+          secondError => {
+            clearTimeout(hardTimeout);
+            finishError(secondError || firstError);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+            forceRequestLocation: true,
+            showLocationDialog: true,
+          },
+        );
+      },
       {
         enableHighAccuracy: false,
-        timeout: 6000,
-        maximumAge: 3 * 60 * 1000,
-        forceRequestLocation: false,
+        timeout: 7000,
+        maximumAge: 5 * 60 * 1000,
+        forceRequestLocation: true,
         showLocationDialog: true,
       },
     );
@@ -796,8 +980,8 @@ const getBigDataLocationName = async (lat, lon) => {
   });
 
   return pickFirstLocationName(
-    data.locality,
     smallPlace?.name,
+    data.locality,
     data.city,
     data.principalSubdivision,
     data.countryName,
@@ -966,6 +1150,10 @@ export default function Weather() {
 
   const weatherRef = useRef(null);
   const intervalRef = useRef(null);
+  const appStateRef = useRef(AppState.currentState);
+  const isLoadingWeatherRef = useRef(false);
+  const hasAnimatedOnceRef = useRef(false);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
 
@@ -973,31 +1161,15 @@ export default function Weather() {
     weatherRef.current = weather;
   }, [weather]);
 
-  useEffect(() => {
-    const setupNotifications = async () => {
-      try {
-        await notifee.requestPermission();
-
-        if (Platform.OS === 'android') {
-          await notifee.createChannel({
-            id: RAIN_ALERT_CHANNEL_ID,
-            name: 'Weather Alerts',
-            importance: AndroidImportance.HIGH,
-          });
-        }
-      } catch {}
-    };
-
-    setupNotifications();
-  }, []);
-
   const currentCode = weather?.current?.weather_code ?? 3;
   const isDay = weather?.current?.is_day !== 0;
 
   const safeThemeCode =
     weather && isActualRainNow(currentCode, weather?.currentRain)
       ? currentCode
-      : 3;
+      : isRainCode(currentCode)
+      ? 3
+      : currentCode;
 
   const theme = useMemo(
     () => getTheme(safeThemeCode, isDay),
@@ -1017,6 +1189,10 @@ export default function Weather() {
   }, [weather]);
 
   const animateIn = () => {
+    if (hasAnimatedOnceRef.current) return;
+
+    hasAnimatedOnceRef.current = true;
+
     fadeAnim.setValue(0);
     slideAnim.setValue(20);
 
@@ -1035,6 +1211,10 @@ export default function Weather() {
   };
 
   const loadWeather = async ({ silent = false, isRefresh = false } = {}) => {
+    if (isLoadingWeatherRef.current) return;
+
+    isLoadingWeatherRef.current = true;
+
     try {
       setError('');
       setPermissionError(false);
@@ -1049,7 +1229,7 @@ export default function Weather() {
 
         if (weatherRef.current) {
           setUsingCached(true);
-          setNotice('Location allow malpu live refresh ge.');
+          setNotice('Allow location to refresh live.');
           return;
         }
 
@@ -1072,7 +1252,7 @@ export default function Weather() {
       if (!lat || !lon) {
         if (weatherRef.current) {
           setUsingCached(true);
-          setNotice('GPS fail aath. Last weather torpundu.');
+          setNotice('GPS failed. Showing last weather.');
           return;
         }
 
@@ -1108,33 +1288,62 @@ export default function Weather() {
         setUsingCached(true);
         setNotice(
           err?.code === 3
-            ? 'GPS timeout aath. Last weather torpundu.'
-            : 'Refresh fail aath. Last weather torpundu.',
+            ? 'GPS timed out. Showing last weather.'
+            : 'Refresh failed. Showing last weather.',
         );
         return;
       }
 
       if (err?.code === 3) {
-        setError(
-          'GPS timeout aath.\nGPS matte internet on malpu, matte try malpu.',
-        );
+        setError('GPS timed out.\nTurn on GPS & internet, then retry.');
       } else if (err?.code === 2) {
-        setError('Location sigand.\nGPS matte network check malpu.');
+        setError('Location unavailable.\nCheck GPS & network.');
       } else if (err?.code === 1) {
         setPermissionError(true);
-        setError('Location denied aath.\nPlease location access allow malpu.');
+        setError('Location denied.\nPlease allow location access.');
       } else {
         setError(
           err?.message
-            ? `Weather load aapundijji.\n${err.message}`
-            : 'Load aapundijji.\nTap malpu retry ge.',
+            ? `Couldn't load weather.\n${err.message}`
+            : "Couldn't load.\nTap to retry.",
         );
       }
     } finally {
+      isLoadingWeatherRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    const setupNotifications = async () => {
+      try {
+        await notifee.requestPermission();
+        await createWeatherNotificationChannel();
+      } catch {}
+    };
+
+    setupNotifications();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      const wasAway = appStateRef.current.match(/inactive|background/);
+      appStateRef.current = nextAppState;
+
+      if (wasAway && nextAppState === 'active') {
+        requestLocationPermission().then(granted => {
+          if (granted) {
+            setPermissionError(false);
+            setError('');
+            loadWeather({ isRefresh: true });
+          }
+        });
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const boot = async () => {
@@ -1148,7 +1357,7 @@ export default function Weather() {
       ) {
         setWeather(cached);
         setUsingCached(true);
-        setNotice(`Last save ${cached.lastUpdated}`);
+        setNotice(`Last saved at ${cached.lastUpdated}`);
         setLoading(false);
         animateIn();
       }
@@ -1192,8 +1401,8 @@ export default function Weather() {
             <ActivityIndicator size="large" color={theme.accent} />
           </View>
 
-          <Text style={st.loadingTitle}>Location kandupudondhu…</Text>
-          <Text style={st.loadingSubtitle}>Live weather barpundu</Text>
+          <Text style={st.loadingTitle}>Finding your location…</Text>
+          <Text style={st.loadingSubtitle}>Getting live weather</Text>
         </View>
       </View>
     );
@@ -1221,7 +1430,7 @@ export default function Weather() {
             }
           >
             <Text style={[st.retryBtnText, { color: theme.bg }]}>
-              {permissionError ? 'Settings Open Malpu' : 'Matte Try Malpu'}
+              {permissionError ? 'Open Settings' : 'Try Again'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1242,14 +1451,14 @@ export default function Weather() {
         <View style={st.center}>
           <Text style={{ fontSize: 52, marginBottom: 16 }}>🌦️</Text>
 
-          <Text style={st.errorText}>Weather data sigand.</Text>
+          <Text style={st.errorText}>Weather data unavailable.</Text>
 
           <TouchableOpacity
             style={[st.retryBtn, { backgroundColor: theme.accent }]}
             onPress={() => loadWeather()}
           >
             <Text style={[st.retryBtnText, { color: theme.bg }]}>
-              Matte Try Malpu
+              Try Again
             </Text>
           </TouchableOpacity>
         </View>
@@ -1257,9 +1466,7 @@ export default function Weather() {
     );
   }
 
-  const info = isActualRainNow(currentCode, weather.currentRain)
-    ? getWeatherInfo(currentCode)
-    : getWeatherInfo(3);
+  const info = getSafeWeatherInfo(currentCode, weather.currentRain);
 
   const rainAmountText = isActualRainNow(currentCode, weather.currentRain)
     ? `${Number(weather.currentRain).toFixed(1)}mm · ${info.label}`
@@ -1314,7 +1521,7 @@ export default function Weather() {
             </View>
 
             <Text style={st.dateText}>{today}</Text>
-            <Text style={st.updatedText}>Update {weather.lastUpdated}</Text>
+            <Text style={st.updatedText}>Updated {weather.lastUpdated}</Text>
           </View>
 
           <TouchableOpacity
@@ -1348,19 +1555,19 @@ export default function Weather() {
 
           <View style={st.metaRow}>
             <Text style={st.metaText}>
-              Anisodu {Math.round(weather.current?.apparent_temperature ?? 0)}°
+              Feels {Math.round(weather.current?.apparent_temperature ?? 0)}°
             </Text>
 
             <View style={st.metaDot} />
 
             <Text style={st.metaText}>
-              Jasti {Math.round(weather.daily?.maxTemp ?? 0)}°
+              High {Math.round(weather.daily?.maxTemp ?? 0)}°
             </Text>
 
             <View style={st.metaDot} />
 
             <Text style={st.metaText}>
-              Kammi {Math.round(weather.daily?.minTemp ?? 0)}°
+              Low {Math.round(weather.daily?.minTemp ?? 0)}°
             </Text>
           </View>
         </View>
@@ -1374,19 +1581,19 @@ export default function Weather() {
               value: `${Math.round(
                 weather.current?.relative_humidity_2m ?? 0,
               )}%`,
-              label: 'NEERDA AMSHA',
+              label: 'Humidity',
               isAccent: false,
             },
             {
               emoji: '💨',
               value: `${Math.round(weather.current?.wind_speed_10m ?? 0)} km/h`,
-              label: 'GAALI',
+              label: 'Wind',
               isAccent: true,
             },
             {
               emoji: '☔',
               value: `${Math.round(weather.daily?.rainChanceMax ?? 0)}%`,
-              label: 'BARSA CHANCE',
+              label: 'Rain Today',
               isAccent: false,
             },
           ].map((item, index) => (
@@ -1413,12 +1620,12 @@ export default function Weather() {
           {[
             {
               emoji: '🌅',
-              label: 'Surya Barpuna',
+              label: 'Sunrise',
               time: weather.daily?.sunrise,
             },
             {
               emoji: '🌇',
-              label: 'Surya Mulpuna',
+              label: 'Sunset',
               time: weather.daily?.sunset,
             },
           ].map((item, index) => (
@@ -1455,7 +1662,7 @@ export default function Weather() {
               <Text style={st.healthEmoji}>🌫️</Text>
 
               <View style={st.healthTextBlock}>
-                <Text style={st.healthLabel}>GAALI GUNA</Text>
+                <Text style={st.healthLabel}>AIR QUALITY</Text>
                 <Text
                   style={[st.healthStatus, { color: aqiInfo.color }]}
                   numberOfLines={1}
@@ -1507,7 +1714,7 @@ export default function Weather() {
             <Text style={st.healthMessage}>{uvInfo.message}</Text>
 
             <Text style={st.healthSmallText}>
-              I dina UV risk latest forecast d
+              Today's UV risk based on latest forecast
             </Text>
           </View>
         </View>
@@ -1519,8 +1726,8 @@ export default function Weather() {
           ]}
         >
           <View style={st.forecastHeader}>
-            <Text style={st.forecastTitle}>MUNDINA 12 GANTE</Text>
-            <Text style={st.forecastSub}>Ganteg barsa %</Text>
+            <Text style={st.forecastTitle}>NEXT 12 HOURS</Text>
+            <Text style={st.forecastSub}>Rain % per hour</Text>
           </View>
 
           <ScrollView
@@ -1529,8 +1736,11 @@ export default function Weather() {
             contentContainerStyle={{ gap: 10, paddingRight: 18 }}
           >
             {(weather.hourlyList || []).map((item, index) => {
-              const hourInfo = getSafeWeatherInfo(item.code, item.precipMm);
               const isNow = index === 0;
+              const hourInfo = isNow
+                ? getSafeWeatherInfo(item.code, item.precipMm)
+                : getHourlyWeatherInfo(item);
+
               const isHighRain = Number(item.rainChance ?? 0) >= 70;
               const showMm = Number(item.precipMm ?? 0) > 0;
 
@@ -1558,7 +1768,7 @@ export default function Weather() {
                   <Text
                     style={[st.hourLabel, isNow && { color: theme.accent }]}
                   >
-                    {isNow ? 'Iga' : item.label}
+                    {isNow ? 'Now' : item.label}
                   </Text>
 
                   <Text style={{ fontSize: 24, marginVertical: 6 }}>
@@ -1593,7 +1803,7 @@ export default function Weather() {
           </ScrollView>
         </View>
 
-        <Text style={st.footer}>Namma Weather · Open-Meteo</Text>
+        <Text style={st.footer}>Live Weather · Open-Meteo</Text>
       </Animated.ScrollView>
     </View>
   );
