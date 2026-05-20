@@ -1,7 +1,7 @@
 import './global.css';
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Weather from './src/Weather';
 
 function App() {
@@ -9,12 +9,17 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'light-content'}
-        backgroundColor="#071927"
-        translucent={false}
-      />
-      <Weather />
+      <SafeAreaView
+        style={{ flex: 1, backgroundColor: '#071927' }}
+        edges={['left', 'right']}
+      >
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'light-content'}
+          backgroundColor="#071927"
+          translucent={false}
+        />
+        <Weather />
+      </SafeAreaView>
     </SafeAreaProvider>
   );
 }

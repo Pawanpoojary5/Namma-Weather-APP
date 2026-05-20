@@ -22,51 +22,53 @@ import notifee, { AndroidImportance, TriggerType } from '@notifee/react-native';
 const WEATHER_CACHE_KEY = 'wx:weather';
 const COORDS_CACHE_KEY = 'wx:coords';
 const RAIN_START_TIME_KEY = 'wx:rain_start_time';
-const RAIN_NOTIFICATION_STATE_KEY = 'wx:rain_notification_state';
 
 const RAIN_ALERT_NOTIFICATION_ID = 'namma-weather-rain-alert';
 const RAIN_ALERT_CHANNEL_ID = 'weather-alerts';
 
+const MIN_REFRESH_GAP_MS = 10 * 60 * 1000;
 const RAIN_STOP_THRESHOLD = 20;
-const WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const MIN_REAL_RAIN_MM = 0.3;
+const FUTURE_RAIN_MIN_CHANCE = 70;
+const FUTURE_RAIN_MIN_MM = 0.2;
 
 const WMO_MAP = {
-  0: { label: 'Dombu', emoji: '☀️', art: 'sunny' },
-  1: { label: 'Kammi Dombu (Modda)', emoji: '🌤️', art: 'sunny' },
-  2: { label: 'Onthe Mugal', emoji: '⛅', art: 'cloudy' },
-  3: { label: 'Modda', emoji: '☁️', art: 'cloudy' },
-  45: { label: 'Maindu', emoji: '🌫️', art: 'fog' },
-  48: { label: 'Maindu', emoji: '🌫️', art: 'fog' },
+  0: { label: 'DOMBU', emoji: '☀️', art: 'sunny' },
+  1: { label: 'ONTHE DOMBU', emoji: '🌤️', art: 'sunny' },
+  2: { label: 'ONTHE MUGAL', emoji: '⛅', art: 'cloudy' },
+  3: { label: 'MODA', emoji: '☁️', art: 'cloudy' },
+  45: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
+  48: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
 
-  51: { label: 'Churu Dombu Barsa', emoji: '🌦️', art: 'rain' },
-  53: { label: 'Dombu Barsa', emoji: '🌦️', art: 'rain' },
-  55: { label: 'Joru Dombu Barsa', emoji: '🌧️', art: 'rain' },
-  56: { label: 'Chali DombuBarsa', emoji: '🌧️', art: 'rain' },
-  57: { label: 'Jor Chali Dombu Barsa', emoji: '🌧️', art: 'rain' },
+  51: { label: 'PANI DOMBU BARSA', emoji: '🌦️', art: 'rain' },
+  53: { label: 'DOMBU BARSA', emoji: '🌦️', art: 'rain' },
+  55: { label: 'PANI BARSA', emoji: '🌧️', art: 'rain' },
+  56: { label: 'CHIMMA BARSA', emoji: '🌧️', art: 'rain' },
+  57: { label: 'CHIMMA PANI BARSA', emoji: '🌧️', art: 'rain' },
 
-  61: { label: 'Panit Barsa', emoji: '🌧️', art: 'rain' },
-  63: { label: 'Barsa', emoji: '🌧️', art: 'rain' },
-  65: { label: 'Bolla Barsa', emoji: '🌧️', art: 'rain' },
-  66: { label: 'Chali Barsa', emoji: '🌧️', art: 'rain' },
-  67: { label: 'Masth Chali Barsa', emoji: '🌧️', art: 'rain' },
+  61: { label: 'ONTHE BARSA', emoji: '🌧️', art: 'rain' },
+  63: { label: 'BARSA', emoji: '🌧️', art: 'rain' },
+  65: { label: 'BOLLA BARSA', emoji: '🌧️', art: 'rain' },
+  66: { label: 'CHALI BARSA', emoji: '🌧️', art: 'rain' },
+  67: { label: 'CHALI BARSA MASTH', emoji: '🌧️', art: 'rain' },
 
-  71: { label: 'Panit Ice', emoji: '🌨️', art: 'snow' },
-  73: { label: 'Hima', emoji: '🌨️', art: 'snow' },
-  75: { label: 'Joru Hima', emoji: '❄️', art: 'snow' },
-  77: { label: 'Chimma Hima', emoji: '❄️', art: 'snow' },
+  71: { label: 'PANIT ICE', emoji: '🌨️', art: 'snow' },
+  73: { label: 'HIMA', emoji: '🌨️', art: 'snow' },
+  75: { label: 'JORU HIMA', emoji: '❄️', art: 'snow' },
+  77: { label: 'CHIMMA HIMA', emoji: '❄️', art: 'snow' },
 
-  80: { label: 'Onthe barsa barpund', emoji: '🌦️', art: 'rain' },
-  81: { label: 'Barsa Barondhu undu', emoji: '🌦️', art: 'rain' },
-  82: { label: 'Joru Barsa Barondhu undu', emoji: '⛈️', art: 'storm' },
+  80: { label: 'BARSA BARPUNDU', emoji: '🌦️', art: 'rain' },
+  81: { label: 'BARSA BARPUNDU', emoji: '🌦️', art: 'rain' },
+  82: { label: 'JORU BARSA BARPUNDU', emoji: '⛈️', art: 'storm' },
 
-  85: { label: 'Chimma Barsa', emoji: '🌨️', art: 'snow' },
-  86: { label: 'Masth Chimma Barsa', emoji: '🌨️', art: 'snow' },
+  85: { label: 'CHIMMA BARSA', emoji: '🌨️', art: 'snow' },
+  86: { label: 'MASTH CHIMMA BARSA', emoji: '🌨️', art: 'snow' },
 
-  95: { label: 'Tedil Boka Barsa', emoji: '⛈️', art: 'storm' },
-  96: { label: 'Tedil Boka onthe Barsa', emoji: '⛈️', art: 'storm' },
-  99: { label: 'Tedil Boka Joru Barsa', emoji: '⛈️', art: 'storm' },
+  95: { label: 'TEDIL BOKA BARSA', emoji: '⛈️', art: 'storm' },
+  96: { label: 'TEDIL BOKA ONTHE BARSA', emoji: '⛈️', art: 'storm' },
+  99: { label: 'TEDIL BOKA JORU BARSA', emoji: '⛈️', art: 'storm' },
 };
+
 const RAIN_CODES = [
   51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 85, 86, 95, 96, 99,
 ];
@@ -81,22 +83,19 @@ const ART_EMOJI = {
 };
 
 const isRainCode = code => RAIN_CODES.includes(Number(code));
-
 const hasRealRain = value => Number(value || 0) >= MIN_REAL_RAIN_MM;
-
 const isActualRainNow = (code, rainAmount) =>
   isRainCode(code) && hasRealRain(rainAmount);
 
-const isRealFutureRain = item => {
-  const chance = Number(item.rainChance ?? 0);
-  const precipMm = Number(item.precipMm ?? 0);
-  const codeRain = isRainCode(item.code);
+const isFutureRainStrong = item => {
+  const chance = Number(item?.rainChance ?? 0);
+  const precipMm = Number(item?.precipMm ?? 0);
 
-  return chance >= 70 || precipMm >= 0.2 || codeRain;
+  return chance >= FUTURE_RAIN_MIN_CHANCE || precipMm >= FUTURE_RAIN_MIN_MM;
 };
 
 const getWeatherInfo = code =>
-  WMO_MAP[Number(code)] || { label: 'Modda', emoji: '☁️', art: 'cloudy' };
+  WMO_MAP[Number(code)] || { label: 'MODA', emoji: '☁️', art: 'cloudy' };
 
 const getSafeWeatherInfo = (code, rainAmount = 0) => {
   if (isRainCode(code) && !hasRealRain(rainAmount)) {
@@ -107,14 +106,31 @@ const getSafeWeatherInfo = (code, rainAmount = 0) => {
 };
 
 const getHourlyWeatherInfo = item => {
-  const chance = Number(item.rainChance ?? 0);
-  const precipMm = Number(item.precipMm ?? 0);
+  if (!item) return WMO_MAP[3];
 
-  if (chance >= 70 || precipMm >= 0.2 || isRainCode(item.code)) {
-    return getWeatherInfo(item.code);
+  const chance = Number(item?.rainChance ?? 0);
+  const precipMm = Number(item?.precipMm ?? 0);
+
+  if (chance >= FUTURE_RAIN_MIN_CHANCE || precipMm >= FUTURE_RAIN_MIN_MM) {
+    return getWeatherInfo(item?.code);
   }
 
-  return getSafeWeatherInfo(item.code, precipMm);
+  if (isRainCode(item?.code) && precipMm < MIN_REAL_RAIN_MM) {
+    return WMO_MAP[3];
+  }
+
+  return getWeatherInfo(item?.code);
+};
+
+const toNumberOrNull = value => {
+  const n = Number(value);
+  return value === null || value === undefined || Number.isNaN(n) ? null : n;
+};
+
+const formatOptional = (value, digits = 0) => {
+  const n = toNumberOrNull(value);
+  if (n === null) return '--';
+  return n.toFixed(digits);
 };
 
 const toClockTime = ts =>
@@ -139,17 +155,6 @@ const formatHour = dt => {
   const ap = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   return `${h}${ap}`;
-};
-
-const toNumberOrNull = value => {
-  const n = Number(value);
-  return value === null || value === undefined || Number.isNaN(n) ? null : n;
-};
-
-const formatOptional = (value, digits = 0) => {
-  const n = toNumberOrNull(value);
-  if (n === null) return '--';
-  return n.toFixed(digits);
 };
 
 const cleanLocationName = value => {
@@ -196,6 +201,20 @@ const getNearestHourlyIndex = times => {
   });
 
   return bestIndex;
+};
+
+const getTheme = (code, isDay) => {
+  if (!isDay) return { bg: '#080D1A', accent: '#8EA7FF' };
+
+  if (isRainCode(code)) {
+    return { bg: '#071927', accent: '#6CD9FF' };
+  }
+
+  if ([0, 1].includes(Number(code))) {
+    return { bg: '#0A1728', accent: '#FFD166' };
+  }
+
+  return { bg: '#0A0F1E', accent: '#4DFFB4' };
 };
 
 const getAQIInfo = value => {
@@ -324,6 +343,8 @@ const getUVInfo = value => {
 };
 
 const createWeatherNotificationChannel = async () => {
+  await notifee.requestPermission();
+
   if (Platform.OS === 'android') {
     return notifee.createChannel({
       id: RAIN_ALERT_CHANNEL_ID,
@@ -342,6 +363,8 @@ const cancelRainNotification = async () => {
     if (typeof notifee.cancelTriggerNotification === 'function') {
       await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
     }
+
+    await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
   } catch {}
 };
 
@@ -350,10 +373,12 @@ const findRainStopSlot = hourlyList => {
 
   return (
     hourlyList.find(item => {
+      if (!item) return false;
+
       const chance = Number(item.rainChance ?? 0);
       const precipMm = Number(item.precipMm ?? 0);
 
-      return chance < RAIN_STOP_THRESHOLD && !hasRealRain(precipMm);
+      return chance < RAIN_STOP_THRESHOLD && precipMm < MIN_REAL_RAIN_MM;
     }) || null
   );
 };
@@ -379,7 +404,6 @@ const buildRainStopLabel = stopTime => {
   const hours = Math.round(minutes / 60);
 
   if (hours <= 1) return 'Stops in ~1 hr';
-  if (hours <= 2) return 'Stops in ~2 hrs';
   if (hours <= 3) return `Stops in ~${hours} hrs`;
 
   return `Stops around ${toClockTime(stopMs)}`;
@@ -406,7 +430,6 @@ const buildRainStopNotificationLabel = stopTime => {
   const hours = Math.round(minutes / 60);
 
   if (hours <= 1) return '~1 gante d Untundu';
-  if (hours <= 2) return '~2 gante d Untundu';
   if (hours <= 3) return `~${hours} gante d Untundu`;
 
   return `${toClockTime(stopMs)} ganteg Untundu`;
@@ -436,13 +459,15 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   const now = Date.now();
 
   const firstRainSlot = hourlyList.find(item => {
+    if (!item) return false;
+
     const itemTime = new Date(item.time).getTime();
 
     if (itemTime <= now + 5 * 60 * 1000) {
       return false;
     }
 
-    return isRealFutureRain(item);
+    return isFutureRainStrong(item);
   });
 
   if (!firstRainSlot) return { state: 'no_rain' };
@@ -450,12 +475,12 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   const startIndex = hourlyList.indexOf(firstRainSlot);
 
   const stopAfterRain = hourlyList.find((item, index) => {
-    if (index <= startIndex) return false;
+    if (!item || index <= startIndex) return false;
 
     const chance = Number(item.rainChance ?? 0);
     const precipMm = Number(item.precipMm ?? 0);
 
-    return chance < RAIN_STOP_THRESHOLD && !hasRealRain(precipMm);
+    return chance < RAIN_STOP_THRESHOLD && precipMm < MIN_REAL_RAIN_MM;
   });
 
   const rainWindow = hourlyList.slice(
@@ -464,8 +489,8 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   );
 
   const maxChance = rainWindow.length
-    ? Math.max(...rainWindow.map(item => Number(item.rainChance ?? 0)))
-    : Number(firstRainSlot.rainChance ?? 0);
+    ? Math.max(...rainWindow.map(item => Number(item?.rainChance ?? 0)))
+    : Number(firstRainSlot?.rainChance ?? 0);
 
   const startTime = new Date(firstRainSlot.time).getTime();
   const stopTime = stopAfterRain
@@ -482,59 +507,46 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   };
 };
 
+let lastNotificationState = null;
+
 const syncRainNotification = async weatherPayload => {
   try {
-    if (!weatherPayload?.hourlyList?.length || !weatherPayload?.current) return;
+    if (!weatherPayload?.hourlyList?.length) {
+      await cancelRainNotification();
+      lastNotificationState = null;
+      return;
+    }
 
     const rainPrediction = predictRain(
       weatherPayload.hourlyList,
-      weatherPayload.current.weather_code,
+      weatherPayload.current?.weather_code,
       weatherPayload.currentRain,
     );
 
-    const previousStateRaw = await AsyncStorage.getItem(
-      RAIN_NOTIFICATION_STATE_KEY,
-    );
+    const stateKey = `${rainPrediction.state}-${rainPrediction.stopTime}-${rainPrediction.startTime}`;
 
-    const previousState = previousStateRaw ? JSON.parse(previousStateRaw) : {};
+    if (lastNotificationState === stateKey) {
+      return;
+    }
+
+    lastNotificationState = stateKey;
 
     if (rainPrediction.state === 'no_rain') {
-      await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
-      await AsyncStorage.removeItem(RAIN_NOTIFICATION_STATE_KEY);
       await cancelRainNotification();
       return;
     }
 
     if (rainPrediction.state === 'raining_now') {
-      let storedStartTime = await AsyncStorage.getItem(RAIN_START_TIME_KEY);
-
-      if (!storedStartTime) {
-        storedStartTime = String(Date.now());
-        await AsyncStorage.setItem(RAIN_START_TIME_KEY, storedStartTime);
-      }
-
-      const currentBody =
-        buildRainStopNotificationLabel(rainPrediction.stopTime) ||
-        'Rain is active now';
-
-      const alreadyShown =
-        previousState.type === 'raining_now' &&
-        previousState.body === currentBody;
-
-      if (alreadyShown) {
-        return;
-      }
-
-      if (typeof notifee.cancelTriggerNotification === 'function') {
-        await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
-      }
+      await AsyncStorage.setItem(RAIN_START_TIME_KEY, String(Date.now()));
 
       const channelId = await createWeatherNotificationChannel();
 
       await notifee.displayNotification({
         id: RAIN_ALERT_NOTIFICATION_ID,
         title: '🌧️ Barsa Barondu Undu',
-        body: currentBody,
+        body:
+          buildRainStopNotificationLabel(rainPrediction.stopTime) ||
+          'Rain is active now',
         android: {
           channelId,
           color: '#6CD9FF',
@@ -544,72 +556,29 @@ const syncRainNotification = async weatherPayload => {
         },
       });
 
-      await AsyncStorage.setItem(
-        RAIN_NOTIFICATION_STATE_KEY,
-        JSON.stringify({
-          type: 'raining_now',
-          body: currentBody,
-          shownAt: Date.now(),
-        }),
-      );
-
       return;
     }
 
     if (rainPrediction.state === 'rain_coming' && rainPrediction.startTime) {
-      await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
-
       const notifyAt = rainPrediction.startTime - 30 * 60 * 1000;
 
-      const notificationBody = `Barsa ola shuru  avu  ${rainPrediction.startTimeLabel} Ganteg.RainCoat ejanda kodde pathonle.`;
-
-      const alreadyScheduled =
-        previousState.type === 'rain_coming' &&
-        previousState.notifyAt === notifyAt &&
-        previousState.body === notificationBody;
-
-      if (alreadyScheduled) {
+      if (notifyAt <= Date.now()) {
         return;
-      }
-
-      if (typeof notifee.cancelTriggerNotification === 'function') {
-        await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
       }
 
       const channelId = await createWeatherNotificationChannel();
-
-      if (notifyAt <= Date.now() + 60 * 1000) {
-        await notifee.displayNotification({
-          id: RAIN_ALERT_NOTIFICATION_ID,
-          title: 'Barsa Jagrathe 🌧️',
-          body: notificationBody,
-          android: {
-            channelId,
-            color: '#6CD9FF',
-            pressAction: {
-              id: 'default',
-            },
-          },
-        });
-
-        await AsyncStorage.setItem(
-          RAIN_NOTIFICATION_STATE_KEY,
-          JSON.stringify({
-            type: 'rain_coming',
-            notifyAt,
-            body: notificationBody,
-            shownAt: Date.now(),
-          }),
-        );
-
-        return;
-      }
 
       await notifee.createTriggerNotification(
         {
           id: RAIN_ALERT_NOTIFICATION_ID,
           title: 'Barsa Jagrathe 🌧️',
-          body: notificationBody,
+          body: rainPrediction.stopTime
+            ? `Barsa ${
+                rainPrediction.startTimeLabel
+              } d shuru avu, ${toClockTime(
+                rainPrediction.stopTime,
+              )} g clear avu.`
+            : `Barsa ${rainPrediction.startTimeLabel} d shuru avu. Rain may continue today.`,
           android: {
             channelId,
             color: '#6CD9FF',
@@ -623,200 +592,8 @@ const syncRainNotification = async weatherPayload => {
           timestamp: notifyAt,
         },
       );
-
-      await AsyncStorage.setItem(
-        RAIN_NOTIFICATION_STATE_KEY,
-        JSON.stringify({
-          type: 'rain_coming',
-          notifyAt,
-          body: notificationBody,
-          scheduledAt: Date.now(),
-        }),
-      );
     }
-  } catch {
-    // Notification failure should not break weather loading.
-  }
-};
-
-const getTheme = (code, isDay) => {
-  if (!isDay) return { bg: '#080D1A', accent: '#8EA7FF' };
-  if (isRainCode(code)) return { bg: '#071927', accent: '#6CD9FF' };
-
-  if ([0, 1].includes(Number(code))) {
-    return { bg: '#0A1728', accent: '#FFD166' };
-  }
-
-  return { bg: '#0A0F1E', accent: '#4DFFB4' };
-};
-
-const WeatherArt = ({ artType, accent }) => {
-  const bounce = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bounce, {
-          toValue: -10,
-          duration: 2400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bounce, {
-          toValue: 0,
-          duration: 2400,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    animation.start();
-
-    return () => animation.stop();
-  }, [bounce]);
-
-  return (
-    <Animated.View
-      style={{ alignItems: 'center', transform: [{ translateY: bounce }] }}
-    >
-      <View
-        style={{
-          position: 'absolute',
-          width: 150,
-          height: 150,
-          borderRadius: 75,
-          backgroundColor: accent + '16',
-          top: 15,
-          alignSelf: 'center',
-        }}
-      />
-
-      <Text style={{ fontSize: 108, lineHeight: 124 }}>
-        {ART_EMOJI[artType] || '☁️'}
-      </Text>
-    </Animated.View>
-  );
-};
-
-const PulseDot = ({ accent }) => {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, {
-          toValue: 1.9,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    animation.start();
-
-    return () => animation.stop();
-  }, [scale]);
-
-  return (
-    <View
-      style={{
-        width: 14,
-        height: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 7,
-      }}
-    >
-      <Animated.View
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: 4,
-          backgroundColor: accent,
-          transform: [{ scale }],
-          opacity: 0.9,
-        }}
-      />
-    </View>
-  );
-};
-
-const RainTimerCard = ({ prediction, accent }) => {
-  if (prediction.state === 'no_rain') return null;
-
-  const isNow = prediction.state === 'raining_now';
-  const bg = accent + '14';
-  const border = accent + '38';
-
-  if (isNow) {
-    return (
-      <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
-        <View style={st.rainCardRow}>
-          <View style={st.rainTimerBlock}>
-            <Text style={st.rainTimerIcon}>🌧️</Text>
-            <Text style={[st.rainTimerLabel, { color: accent }]}>
-              Rain is active
-            </Text>
-            <Text style={st.rainTimerClock}>{toClockTime(Date.now())}</Text>
-          </View>
-
-          <View style={st.rainTimerDivider} />
-
-          <View style={st.rainTimerBlock}>
-            <Text style={st.rainTimerIcon}>🌤️</Text>
-            <Text style={st.rainTimerLabel}>Clears up</Text>
-            <Text
-              style={[st.rainTimerClock, st.rainTimerClockSmall]}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-            >
-              {prediction.stopTimeLabel || 'All day'}
-            </Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
-      <View style={st.rainCardRow}>
-        <View style={st.rainTimerBlock}>
-          <Text style={st.rainTimerIcon}>🕐</Text>
-          <Text style={st.rainTimerLabel}>Rain starts</Text>
-          <Text style={[st.rainTimerClock, { color: accent }]}>
-            {prediction.startTimeLabel}
-          </Text>
-        </View>
-
-        <View style={st.rainTimerDivider} />
-
-        <View style={st.rainTimerBlock}>
-          <Text style={st.rainTimerIcon}>☀️</Text>
-          <Text style={st.rainTimerLabel}>Clears up</Text>
-          <Text
-            style={[st.rainTimerClock, st.rainTimerClockSmall]}
-            numberOfLines={2}
-            adjustsFontSizeToFit
-            minimumFontScale={0.78}
-          >
-            {prediction.stopTimeLabel || '–'}
-          </Text>
-        </View>
-      </View>
-
-      {prediction.chance > 0 && (
-        <Text style={st.rainChanceLabel}>
-          {prediction.chance}% chance of rain
-        </Text>
-      )}
-    </View>
-  );
+  } catch {}
 };
 
 const requestLocationPermission = async () => {
@@ -854,7 +631,7 @@ const requestLocationPermission = async () => {
   }
 };
 
-const getCurrentLocation = () =>
+const getCurrentLocation = (isRefresh = false) =>
   new Promise((resolve, reject) => {
     let finished = false;
 
@@ -870,41 +647,28 @@ const getCurrentLocation = () =>
       reject(error);
     };
 
+    const timeoutMs = isRefresh ? 8000 : 12000;
+
     const hardTimeout = setTimeout(() => {
       finishError({
         code: 3,
         message: 'Location request timed out',
       });
-    }, 15000);
+    }, timeoutMs);
 
     Geolocation.getCurrentPosition(
       position => {
         clearTimeout(hardTimeout);
         finishSuccess(position);
       },
-      firstError => {
-        Geolocation.getCurrentPosition(
-          position => {
-            clearTimeout(hardTimeout);
-            finishSuccess(position);
-          },
-          secondError => {
-            clearTimeout(hardTimeout);
-            finishError(secondError || firstError);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0,
-            forceRequestLocation: true,
-            showLocationDialog: true,
-          },
-        );
+      error => {
+        clearTimeout(hardTimeout);
+        finishError(error);
       },
       {
-        enableHighAccuracy: false,
-        timeout: 7000,
-        maximumAge: 5 * 60 * 1000,
+        enableHighAccuracy: isRefresh,
+        timeout: isRefresh ? 6000 : 8000,
+        maximumAge: isRefresh ? 0 : 10 * 60 * 1000,
         forceRequestLocation: true,
         showLocationDialog: true,
       },
@@ -980,8 +744,8 @@ const getBigDataLocationName = async (lat, lon) => {
   });
 
   return pickFirstLocationName(
-    smallPlace?.name,
     data.locality,
+    smallPlace?.name,
     data.city,
     data.principalSubdivision,
     data.countryName,
@@ -1137,6 +901,155 @@ const readCoords = async () => {
   }
 };
 
+const WeatherArt = ({ artType, accent }) => {
+  const bounce = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, {
+          toValue: -10,
+          duration: 2400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bounce, {
+          toValue: 0,
+          duration: 2400,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [bounce]);
+
+  return (
+    <Animated.View
+      style={{ alignItems: 'center', transform: [{ translateY: bounce }] }}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: 75,
+          backgroundColor: accent + '16',
+          top: 15,
+          alignSelf: 'center',
+        }}
+      />
+
+      <Text style={{ fontSize: 108, lineHeight: 124 }}>
+        {ART_EMOJI[artType] || '☁️'}
+      </Text>
+    </Animated.View>
+  );
+};
+
+const RainTimerCard = ({ prediction, accent }) => {
+  if (prediction.state === 'no_rain') return null;
+
+  const isNow = prediction.state === 'raining_now';
+  const bg = accent + '14';
+  const border = accent + '38';
+
+  if (isNow) {
+    return (
+      <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
+        <View style={st.rainCardRow}>
+          <View style={st.rainTimerBlock}>
+            <Text style={st.rainTimerIcon}>🌧️</Text>
+            <Text style={[st.rainTimerLabel, { color: accent }]}>
+              Rain is active
+            </Text>
+            <Text style={st.rainTimerClock}>{toClockTime(Date.now())}</Text>
+          </View>
+
+          <View style={st.rainTimerDivider} />
+
+          <View style={st.rainTimerBlock}>
+            <Text style={st.rainTimerIcon}>
+              {prediction.stopTime ? '🌤️' : '🌧️'}
+            </Text>
+            <Text style={st.rainTimerLabel}>
+              {prediction.stopTime ? 'Clears up' : 'Rain status'}
+            </Text>
+            <Text
+              style={[st.rainTimerClock, st.rainTimerClockSmall]}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              {prediction.stopTimeLabel || 'Rain may continue today'}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
+      <View style={st.rainCardRow}>
+        <View style={st.rainTimerBlock}>
+          <Text style={st.rainTimerIcon}>🕐</Text>
+          <Text style={st.rainTimerLabel}>Rain starts</Text>
+          <Text style={[st.rainTimerClock, { color: accent }]}>
+            {prediction.startTimeLabel}
+          </Text>
+        </View>
+
+        <View style={st.rainTimerDivider} />
+
+        <View style={st.rainTimerBlock}>
+          <Text style={st.rainTimerIcon}>
+            {prediction.stopTime ? '☀️' : '🌧️'}
+          </Text>
+          <Text style={st.rainTimerLabel}>
+            {prediction.stopTime ? 'Clears up' : 'Rain status'}
+          </Text>
+          <Text
+            style={[st.rainTimerClock, st.rainTimerClockSmall]}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
+          >
+            {prediction.stopTimeLabel || 'Rain may continue today'}
+          </Text>
+        </View>
+      </View>
+
+      {prediction.chance > 0 && (
+        <Text style={st.rainChanceLabel}>
+          {prediction.chance}% chance with rain amount
+        </Text>
+      )}
+    </View>
+  );
+};
+
+const MetricCard = ({ label, value, sub, accent }) => (
+  <View style={st.metricCard}>
+    <Text style={st.metricLabel}>{label}</Text>
+    <Text style={[st.metricValue, { color: accent }]}>{value}</Text>
+    {!!sub && <Text style={st.metricSub}>{sub}</Text>}
+  </View>
+);
+
+const InfoCard = ({ title, value, label, message, color }) => (
+  <View style={st.infoCard}>
+    <View style={{ flex: 1 }}>
+      <Text style={st.infoTitle}>{title}</Text>
+      <Text style={[st.infoLabel, { color }]}>{label}</Text>
+      <Text style={st.infoMessage}>{message}</Text>
+    </View>
+
+    <Text style={[st.infoValue, { color }]}>{value}</Text>
+  </View>
+);
+
 export default function Weather() {
   const insets = useSafeAreaInsets();
 
@@ -1149,10 +1062,10 @@ export default function Weather() {
   const [notice, setNotice] = useState('');
 
   const weatherRef = useRef(null);
-  const intervalRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
-  const isLoadingWeatherRef = useRef(false);
-  const hasAnimatedOnceRef = useRef(false);
+  const isFetchingRef = useRef(false);
+  const lastFetchRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
@@ -1160,6 +1073,12 @@ export default function Weather() {
   useEffect(() => {
     weatherRef.current = weather;
   }, [weather]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const currentCode = weather?.current?.weather_code ?? 3;
   const isDay = weather?.current?.is_day !== 0;
@@ -1188,11 +1107,28 @@ export default function Weather() {
     );
   }, [weather]);
 
+  const currentInfo = useMemo(() => {
+    if (!weather?.current) return getWeatherInfo(3);
+
+    return getSafeWeatherInfo(
+      weather.current.weather_code,
+      weather.currentRain,
+    );
+  }, [weather]);
+
+  const aqiInfo = useMemo(
+    () => getAQIInfo(weather?.airQuality?.aqi),
+    [weather],
+  );
+
+  const uvInfo = useMemo(() => {
+    const currentUv =
+      weather?.airQuality?.uvIndex ?? weather?.daily?.uvIndexMax ?? null;
+
+    return getUVInfo(currentUv);
+  }, [weather]);
+
   const animateIn = () => {
-    if (hasAnimatedOnceRef.current) return;
-
-    hasAnimatedOnceRef.current = true;
-
     fadeAnim.setValue(0);
     slideAnim.setValue(20);
 
@@ -1211,21 +1147,33 @@ export default function Weather() {
   };
 
   const loadWeather = async ({ silent = false, isRefresh = false } = {}) => {
-    if (isLoadingWeatherRef.current) return;
+    if (isFetchingRef.current) {
+      if (isRefresh) setRefreshing(false);
+      return;
+    }
 
-    isLoadingWeatherRef.current = true;
+    isFetchingRef.current = true;
+    lastFetchRef.current = Date.now();
 
     try {
+      if (!isMountedRef.current) return;
+
       setError('');
       setPermissionError(false);
 
-      if (isRefresh) setRefreshing(true);
-      else if (!silent && !weatherRef.current) setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else if (!silent && !weatherRef.current) {
+        setLoading(true);
+      }
 
       const hasPermission = await requestLocationPermission();
 
+      if (!isMountedRef.current) return;
+
       if (!hasPermission) {
         setPermissionError(true);
+        await cancelRainNotification();
 
         if (weatherRef.current) {
           setUsingCached(true);
@@ -1241,38 +1189,32 @@ export default function Weather() {
       let cachedCoords = null;
 
       try {
-        position = await getCurrentLocation();
+        position = await getCurrentLocation(isRefresh);
       } catch {
         cachedCoords = await readCoords();
       }
 
-      const lat = position?.coords?.latitude ?? cachedCoords?.latitude;
-      const lon = position?.coords?.longitude ?? cachedCoords?.longitude;
+      const latitude = position?.coords?.latitude ?? cachedCoords?.latitude;
+      const longitude = position?.coords?.longitude ?? cachedCoords?.longitude;
 
-      if (!lat || !lon) {
-        if (weatherRef.current) {
-          setUsingCached(true);
-          setNotice('GPS failed. Showing last weather.');
-          return;
-        }
-
-        throw new Error('Location unavailable. Check GPS & internet.');
+      if (!latitude || !longitude) {
+        throw new Error('Unable to find location.');
       }
 
-      const [cityName, weatherData, airQualityData] = await Promise.all([
-        getCityName(lat, lon).catch(
-          () => cachedCoords?.cityName || 'Your Location',
-        ),
-        getWeatherData(lat, lon),
-        getAirQualityData(lat, lon).catch(() => null),
+      const [cityNameResult, weatherData, airQualityData] = await Promise.all([
+        getCityName(latitude, longitude),
+        getWeatherData(latitude, longitude),
+        getAirQualityData(latitude, longitude).catch(() => null),
       ]);
 
+      if (!isMountedRef.current) return;
+
       const payload = buildPayload({
-        cityName,
+        cityName: cityNameResult || cachedCoords?.cityName || 'Your Location',
         weatherData,
         airQualityData,
-        latitude: lat,
-        longitude: lon,
+        latitude,
+        longitude,
       });
 
       setWeather(payload);
@@ -1284,126 +1226,85 @@ export default function Weather() {
 
       animateIn();
     } catch (err) {
-      if (weatherRef.current) {
+      if (!isMountedRef.current) return;
+
+      await cancelRainNotification();
+
+      const cached = await readCache();
+
+      if (cached && weatherRef.current) {
         setUsingCached(true);
-        setNotice(
-          err?.code === 3
-            ? 'GPS timed out. Showing last weather.'
-            : 'Refresh failed. Showing last weather.',
-        );
+        setNotice('Showing last saved weather.');
         return;
       }
 
-      if (err?.code === 3) {
-        setError('GPS timed out.\nTurn on GPS & internet, then retry.');
-      } else if (err?.code === 2) {
-        setError('Location unavailable.\nCheck GPS & network.');
-      } else if (err?.code === 1) {
-        setPermissionError(true);
-        setError('Location denied.\nPlease allow location access.');
-      } else {
-        setError(
-          err?.message
-            ? `Couldn't load weather.\n${err.message}`
-            : "Couldn't load.\nTap to retry.",
-        );
+      if (cached && !weatherRef.current) {
+        setWeather(cached);
+        setUsingCached(true);
+        setNotice('Showing saved weather (offline).');
+        animateIn();
+        return;
       }
+
+      setError(err?.message || 'Unable to load weather.');
     } finally {
-      isLoadingWeatherRef.current = false;
-      setLoading(false);
-      setRefreshing(false);
+      isFetchingRef.current = false;
+
+      if (isMountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
+  const boot = async () => {
+    await cancelRainNotification();
+
+    const cached = await readCache();
+
+    if (cached && isMountedRef.current) {
+      setWeather(cached);
+      setUsingCached(true);
+      setLoading(false);
+      animateIn();
+    }
+
+    loadWeather({ silent: !!cached });
+  };
+
   useEffect(() => {
-    const setupNotifications = async () => {
-      try {
-        await notifee.requestPermission();
-        await createWeatherNotificationChannel();
-      } catch {}
-    };
+    boot();
 
-    setupNotifications();
-  }, []);
+    const subscription = AppState.addEventListener('change', nextState => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
 
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      const wasAway = appStateRef.current.match(/inactive|background/);
-      appStateRef.current = nextAppState;
+      const cameToForeground =
+        previousState.match(/inactive|background/) && nextState === 'active';
 
-      if (wasAway && nextAppState === 'active') {
-        requestLocationPermission().then(granted => {
-          if (granted) {
-            setPermissionError(false);
-            setError('');
-            loadWeather({ isRefresh: true });
-          }
-        });
+      const canRefreshNow =
+        Date.now() - lastFetchRef.current > MIN_REFRESH_GAP_MS;
+
+      if (cameToForeground && canRefreshNow && isMountedRef.current) {
+        loadWeather({ silent: true });
       }
     });
 
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    const boot = async () => {
-      const cached = await readCache();
-
-      if (
-        cached &&
-        cached.current &&
-        cached.daily &&
-        Array.isArray(cached.hourlyList)
-      ) {
-        setWeather(cached);
-        setUsingCached(true);
-        setNotice(`Last saved at ${cached.lastUpdated}`);
-        setLoading(false);
-        animateIn();
-      }
-
-      await loadWeather({ silent: !!cached });
-    };
-
-    boot();
-
-    intervalRef.current = setInterval(() => {
-      loadWeather({ silent: true });
-    }, WEATHER_REFRESH_MS);
-
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      subscription.remove();
     };
   }, []);
+
+  const openSettings = () => {
+    Linking.openSettings().catch(() => {});
+  };
 
   if (loading && !weather) {
     return (
-      <View
-        style={[
-          st.root,
-          { backgroundColor: theme.bg, paddingTop: Math.max(insets.top, 18) },
-        ]}
-      >
+      <View style={[st.screen, st.center, { backgroundColor: theme.bg }]}>
         <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
-
-        <View style={st.center}>
-          <View
-            style={[
-              st.loadingOrb,
-              {
-                borderColor: theme.accent + '55',
-                backgroundColor: theme.accent + '15',
-              },
-            ]}
-          >
-            <ActivityIndicator size="large" color={theme.accent} />
-          </View>
-
-          <Text style={st.loadingTitle}>Finding your location…</Text>
-          <Text style={st.loadingSubtitle}>Getting live weather</Text>
-        </View>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <Text style={st.loadingText}>Namma Weather loading...</Text>
       </View>
     );
   }
@@ -1412,801 +1313,495 @@ export default function Weather() {
     return (
       <View
         style={[
-          st.root,
-          { backgroundColor: theme.bg, paddingTop: Math.max(insets.top, 18) },
+          st.screen,
+          st.center,
+          { backgroundColor: theme.bg, paddingHorizontal: 24 },
         ]}
       >
         <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
+        <Text style={st.errorIcon}>⚠️</Text>
+        <Text style={st.errorTitle}>Weather not available</Text>
+        <Text style={st.errorText}>{error}</Text>
 
-        <View style={st.center}>
-          <Text style={{ fontSize: 52, marginBottom: 16 }}>⚠️</Text>
-
-          <Text style={st.errorText}>{error}</Text>
-
+        {permissionError && (
           <TouchableOpacity
-            style={[st.retryBtn, { backgroundColor: theme.accent }]}
-            onPress={() =>
-              permissionError ? Linking.openSettings() : loadWeather()
-            }
+            activeOpacity={0.85}
+            style={[st.primaryBtn, { backgroundColor: theme.accent }]}
+            onPress={openSettings}
           >
-            <Text style={[st.retryBtnText, { color: theme.bg }]}>
-              {permissionError ? 'Open Settings' : 'Try Again'}
-            </Text>
+            <Text style={st.primaryBtnText}>Open Settings</Text>
           </TouchableOpacity>
-        </View>
+        )}
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={st.secondaryBtn}
+          onPress={() => loadWeather()}
+        >
+          <Text style={st.secondaryBtnText}>Try Again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  if (!weather) {
-    return (
-      <View
-        style={[
-          st.root,
-          { backgroundColor: theme.bg, paddingTop: Math.max(insets.top, 18) },
-        ]}
-      >
-        <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
-
-        <View style={st.center}>
-          <Text style={{ fontSize: 52, marginBottom: 16 }}>🌦️</Text>
-
-          <Text style={st.errorText}>Weather data unavailable.</Text>
-
-          <TouchableOpacity
-            style={[st.retryBtn, { backgroundColor: theme.accent }]}
-            onPress={() => loadWeather()}
-          >
-            <Text style={[st.retryBtnText, { color: theme.bg }]}>
-              Try Again
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  const info = getSafeWeatherInfo(currentCode, weather.currentRain);
-
-  const rainAmountText = isActualRainNow(currentCode, weather.currentRain)
-    ? `${Number(weather.currentRain).toFixed(1)}mm · ${info.label}`
-    : info.label;
-
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-
-  const aqiInfo = getAQIInfo(weather.airQuality?.aqi);
-
-  const uvInfo = getUVInfo(
-    weather.airQuality?.uvIndex ?? weather.daily?.uvIndexMax,
-  );
+  const temp = Math.round(weather?.current?.temperature_2m ?? 0);
+  const feels = Math.round(weather?.current?.apparent_temperature ?? 0);
+  const humidity = Math.round(weather?.current?.relative_humidity_2m ?? 0);
+  const wind = Math.round(weather?.current?.wind_speed_10m ?? 0);
+  const rainChance = weather?.daily?.rainChanceMax ?? 0;
+  const rainMm = Number(weather?.daily?.precipSum ?? 0);
 
   return (
-    <View
-      style={[
-        st.root,
-        {
-          backgroundColor: theme.bg,
-          paddingTop: Math.max(insets.top, 12),
-          paddingBottom: Math.max(insets.bottom, 12),
-        },
-      ]}
-    >
+    <View style={[st.screen, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
 
-      <Animated.ScrollView
-        style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
-        contentContainerStyle={st.scroll}
+      <ScrollView
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          st.scrollContent,
+          {
+            paddingTop: insets.top + 18,
+            paddingBottom: insets.bottom + 26,
+          },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => loadWeather({ isRefresh: true })}
             tintColor={theme.accent}
             colors={[theme.accent]}
+            progressBackgroundColor="#111827"
           />
         }
       >
-        <View style={st.header}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <PulseDot accent={theme.accent} />
-
-              <Text style={st.cityName} numberOfLines={1}>
-                {weather.cityName || 'Your Location'}
-              </Text>
-            </View>
-
-            <Text style={st.dateText}>{today}</Text>
-            <Text style={st.updatedText}>Updated {weather.lastUpdated}</Text>
-          </View>
-
-          <TouchableOpacity
-            style={[
-              st.refreshBtn,
-              {
-                borderColor: theme.accent + '45',
-                backgroundColor: theme.accent + '12',
-              },
-            ]}
-            onPress={() => loadWeather({ isRefresh: true })}
-          >
-            <Text style={[st.refreshIcon, { color: theme.accent }]}>↻</Text>
-          </TouchableOpacity>
-        </View>
-
-        {usingCached && notice && (
-          <View style={st.noticeBanner}>
-            <Text style={st.noticeText}>{notice}</Text>
-          </View>
-        )}
-
-        <View style={st.heroSection}>
-          <WeatherArt artType={info.art} accent={theme.accent} />
-
-          <Text style={st.heroTemp}>
-            {Math.round(weather.current?.temperature_2m ?? 0)}°C
-          </Text>
-
-          <Text style={st.heroCondition}>{rainAmountText}</Text>
-
-          <View style={st.metaRow}>
-            <Text style={st.metaText}>
-              Feels {Math.round(weather.current?.apparent_temperature ?? 0)}°
-            </Text>
-
-            <View style={st.metaDot} />
-
-            <Text style={st.metaText}>
-              High {Math.round(weather.daily?.maxTemp ?? 0)}°
-            </Text>
-
-            <View style={st.metaDot} />
-
-            <Text style={st.metaText}>
-              Low {Math.round(weather.daily?.minTemp ?? 0)}°
-            </Text>
-          </View>
-        </View>
-
-        <RainTimerCard prediction={prediction} accent={theme.accent} />
-
-        <View style={st.infoRow}>
-          {[
-            {
-              emoji: '💧',
-              value: `${Math.round(
-                weather.current?.relative_humidity_2m ?? 0,
-              )}%`,
-              label: 'Humidity',
-              isAccent: false,
-            },
-            {
-              emoji: '💨',
-              value: `${Math.round(weather.current?.wind_speed_10m ?? 0)} km/h`,
-              label: 'Wind',
-              isAccent: true,
-            },
-            {
-              emoji: '☔',
-              value: `${Math.round(weather.daily?.rainChanceMax ?? 0)}%`,
-              label: 'Rain Today',
-              isAccent: false,
-            },
-          ].map((item, index) => (
-            <View
-              key={index}
-              style={[
-                st.infoCard,
-                item.isAccent
-                  ? {
-                      borderColor: theme.accent + '45',
-                      backgroundColor: theme.accent + '12',
-                    }
-                  : { borderColor: '#ffffff10', backgroundColor: '#ffffff07' },
-              ]}
-            >
-              <Text style={st.infoEmoji}>{item.emoji}</Text>
-              <Text style={st.infoValue}>{item.value}</Text>
-              <Text style={st.infoLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={st.sunRow}>
-          {[
-            {
-              emoji: '🌅',
-              label: 'Sunrise',
-              time: weather.daily?.sunrise,
-            },
-            {
-              emoji: '🌇',
-              label: 'Sunset',
-              time: weather.daily?.sunset,
-            },
-          ].map((item, index) => (
-            <View
-              key={index}
-              style={[
-                st.sunCard,
-                { borderColor: '#ffffff10', backgroundColor: '#ffffff07' },
-              ]}
-            >
-              <Text style={{ fontSize: 26, marginRight: 12 }}>
-                {item.emoji}
-              </Text>
-
-              <View>
-                <Text style={st.sunLabel}>{item.label}</Text>
-                <Text style={st.sunTime}>{formatTime(item.time)}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        <View style={st.healthRow}>
-          <View
-            style={[
-              st.healthCard,
-              {
-                borderColor: aqiInfo.color + '45',
-                backgroundColor: aqiInfo.color + '10',
-              },
-            ]}
-          >
-            <View style={st.healthTopRow}>
-              <Text style={st.healthEmoji}>🌫️</Text>
-
-              <View style={st.healthTextBlock}>
-                <Text style={st.healthLabel}>AIR QUALITY</Text>
-                <Text
-                  style={[st.healthStatus, { color: aqiInfo.color }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.75}
-                >
-                  {aqiInfo.label}
-                </Text>
-              </View>
-
-              <Text style={st.healthValue}>{aqiInfo.value}</Text>
-            </View>
-
-            <Text style={st.healthMessage}>{aqiInfo.message}</Text>
-
-            <Text style={st.healthSmallText}>
-              PM2.5 {formatOptional(weather.airQuality?.pm25, 1)} µg/m³ · PM10{' '}
-              {formatOptional(weather.airQuality?.pm10, 1)} µg/m³
-            </Text>
-          </View>
-
-          <View
-            style={[
-              st.healthCard,
-              {
-                borderColor: uvInfo.color + '45',
-                backgroundColor: uvInfo.color + '10',
-              },
-            ]}
-          >
-            <View style={st.healthTopRow}>
-              <Text style={st.healthEmoji}>🔆</Text>
-
-              <View style={st.healthTextBlock}>
-                <Text style={st.healthLabel}>UV INDEX</Text>
-                <Text
-                  style={[st.healthStatus, { color: uvInfo.color }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.75}
-                >
-                  {uvInfo.label}
-                </Text>
-              </View>
-
-              <Text style={st.healthValue}>{uvInfo.value}</Text>
-            </View>
-
-            <Text style={st.healthMessage}>{uvInfo.message}</Text>
-
-            <Text style={st.healthSmallText}>
-              Today's UV risk based on latest forecast
-            </Text>
-          </View>
-        </View>
-
-        <View
-          style={[
-            st.forecastCard,
-            { borderColor: '#ffffff10', backgroundColor: '#ffffff07' },
-          ]}
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
         >
-          <View style={st.forecastHeader}>
-            <Text style={st.forecastTitle}>NEXT 12 HOURS</Text>
-            <Text style={st.forecastSub}>Rain % per hour</Text>
+          <View style={st.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={st.appTitle}>NAMMA WEATHER</Text>
+              <Text style={st.locationText} numberOfLines={1}>
+                📍 {weather?.cityName || 'Your Location'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[st.refreshBtn, { borderColor: theme.accent + '44' }]}
+              onPress={() => loadWeather({ isRefresh: true })}
+            >
+              {refreshing ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <Text style={[st.refreshIcon, { color: theme.accent }]}>↻</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {!!notice && (
+            <View style={st.noticeBox}>
+              <Text style={st.noticeText}>{notice}</Text>
+            </View>
+          )}
+
+          {usingCached && (
+            <Text style={st.cachedText}>Offline saved weather shown</Text>
+          )}
+
+          <View style={st.heroCard}>
+            <WeatherArt artType={currentInfo.art} accent={theme.accent} />
+
+            <Text style={st.tempText}>{temp}°</Text>
+            <Text style={[st.conditionText, { color: theme.accent }]}>
+              {currentInfo.label}
+            </Text>
+
+            <Text style={st.updatedText}>
+              Updated {weather?.lastUpdated || '--'}
+            </Text>
+
+            <RainTimerCard prediction={prediction} accent={theme.accent} />
+          </View>
+
+          <View style={st.metricsGrid}>
+            <MetricCard
+              label="Feels Like"
+              value={`${feels}°`}
+              sub="Body temp feel"
+              accent={theme.accent}
+            />
+            <MetricCard
+              label="Tampu"
+              value={`${humidity}%`}
+              sub="Neer uppu"
+              accent={theme.accent}
+            />
+            <MetricCard
+              label="Gali"
+              value={`${wind}`}
+              sub="km/h"
+              accent={theme.accent}
+            />
+            <MetricCard
+              label="Barsa Chance"
+              value={`${rainChance}%`}
+              sub={`${rainMm.toFixed(1)} mm`}
+              accent={theme.accent}
+            />
+          </View>
+
+          <View style={st.todayCard}>
+            <View style={st.todayRow}>
+              <View>
+                <Text style={st.sectionTitle}>Today</Text>
+                <Text style={st.sectionSub}>Daily weather details</Text>
+              </View>
+
+              <Text style={[st.todayBadge, { color: theme.accent }]}>
+                {weather?.daily?.minTemp !== undefined
+                  ? `${Math.round(weather.daily.minTemp)}° / ${Math.round(
+                      weather.daily.maxTemp,
+                    )}°`
+                  : '--'}
+              </Text>
+            </View>
+
+            <View style={st.sunRow}>
+              <View style={st.sunBox}>
+                <Text style={st.sunIcon}>🌅</Text>
+                <Text style={st.sunLabel}>Sunrise</Text>
+                <Text style={st.sunValue}>
+                  {formatTime(weather?.daily?.sunrise)}
+                </Text>
+              </View>
+
+              <View style={st.sunBox}>
+                <Text style={st.sunIcon}>🌇</Text>
+                <Text style={st.sunLabel}>Sunset</Text>
+                <Text style={st.sunValue}>
+                  {formatTime(weather?.daily?.sunset)}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={st.sectionHeader}>
+            <Text style={st.sectionTitle}>Hourly</Text>
+            <Text style={st.sectionSub}>Next weather update</Text>
           </View>
 
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 10, paddingRight: 18 }}
+            contentContainerStyle={st.hourlyList}
           >
-            {(weather.hourlyList || []).map((item, index) => {
-              const isNow = index === 0;
-              const hourInfo = isNow
-                ? getSafeWeatherInfo(item.code, item.precipMm)
-                : getHourlyWeatherInfo(item);
-
-              const isHighRain = Number(item.rainChance ?? 0) >= 70;
-              const showMm = Number(item.precipMm ?? 0) > 0;
+            {weather?.hourlyList?.map(item => {
+              const info = getHourlyWeatherInfo(item);
 
               return (
                 <View
-                  key={`${item.time}-${index}`}
+                  key={`${item.time}-${item.code}`}
                   style={[
                     st.hourCard,
-                    isNow
-                      ? {
-                          borderColor: theme.accent + '55',
-                          backgroundColor: theme.accent + '14',
-                        }
-                      : isHighRain
-                      ? {
-                          borderColor: '#6CD9FF28',
-                          backgroundColor: '#6CD9FF08',
-                        }
-                      : {
-                          borderColor: '#ffffff0D',
-                          backgroundColor: '#ffffff05',
-                        },
+                    {
+                      borderColor: theme.accent + '24',
+                      backgroundColor: theme.accent + '0D',
+                    },
                   ]}
                 >
-                  <Text
-                    style={[st.hourLabel, isNow && { color: theme.accent }]}
-                  >
-                    {isNow ? 'Now' : item.label}
+                  <Text style={st.hourLabel}>{item.label}</Text>
+                  <Text style={st.hourIcon}>{info.emoji}</Text>
+                  <Text style={st.hourTemp}>{item.temp}°</Text>
+                  <Text style={st.hourRain}>{item.rainChance}%</Text>
+                  <Text style={st.hourMm}>
+                    {Number(item.precipMm).toFixed(1)}mm
                   </Text>
-
-                  <Text style={{ fontSize: 24, marginVertical: 6 }}>
-                    {hourInfo.emoji}
-                  </Text>
-
-                  <Text style={[st.hourTemp, isNow && { color: theme.accent }]}>
-                    {item.temp}°
-                  </Text>
-
-                  {Number(item.rainChance ?? 0) > 0 ? (
-                    <Text
-                      style={[
-                        st.hourRain,
-                        isHighRain && { color: '#6CD9FF', fontWeight: '800' },
-                      ]}
-                    >
-                      {Math.round(item.rainChance)}%
-                    </Text>
-                  ) : (
-                    <Text style={[st.hourRain, { opacity: 0.3 }]}>–</Text>
-                  )}
-
-                  {showMm && (
-                    <Text style={st.hourMm}>
-                      {Number(item.precipMm).toFixed(1)}mm
-                    </Text>
-                  )}
                 </View>
               );
             })}
           </ScrollView>
-        </View>
 
-        <Text style={st.footer}>Live Weather · Open-Meteo</Text>
-      </Animated.ScrollView>
+          <View style={st.sectionHeader}>
+            <Text style={st.sectionTitle}>Air Quality</Text>
+            <Text style={st.sectionSub}>Health and outdoor safety</Text>
+          </View>
+
+          <InfoCard
+            title="AQI"
+            value={aqiInfo.value}
+            label={aqiInfo.label}
+            message={aqiInfo.message}
+            color={aqiInfo.color}
+          />
+
+          <InfoCard
+            title="UV Index"
+            value={uvInfo.value}
+            label={uvInfo.label}
+            message={uvInfo.message}
+            color={uvInfo.color}
+          />
+
+          <View style={st.metricsGrid}>
+            <MetricCard
+              label="PM2.5"
+              value={formatOptional(weather?.airQuality?.pm25, 1)}
+              sub="Fine dust"
+              accent={theme.accent}
+            />
+            <MetricCard
+              label="PM10"
+              value={formatOptional(weather?.airQuality?.pm10, 1)}
+              sub="Dust level"
+              accent={theme.accent}
+            />
+          </View>
+
+          <Text style={st.footer}> BALMY WEATHER, COASTAL SOUL</Text>
+        </Animated.View>
+      </ScrollView>
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  root: {
+  screen: {
     flex: 1,
   },
-
-  scroll: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
-  },
-
   center: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
   },
-
-  loadingOrb: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+  scrollContent: {
+    paddingHorizontal: 18,
   },
-
-  loadingTitle: {
+  loadingText: {
     color: '#E8EDF5',
-    fontSize: 18,
+    marginTop: 14,
+    fontSize: 15,
     fontWeight: '800',
   },
-
-  loadingSubtitle: {
-    color: '#5A6A82',
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 6,
-  },
-
-  errorText: {
-    color: '#FF6B6B',
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-
-  retryBtn: {
-    marginTop: 22,
-    borderRadius: 16,
-    paddingHorizontal: 28,
-    paddingVertical: 13,
-  },
-
-  retryBtnText: {
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: 0.4,
-  },
-
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 14,
+    alignItems: 'center',
+    marginBottom: 16,
   },
-
-  cityName: {
-    color: '#E8EDF5',
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 0.2,
-    flex: 1,
-  },
-
-  dateText: {
+  appTitle: {
     color: '#5A6A82',
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-
-  updatedText: {
-    color: '#3A4A5A',
     fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-
-  refreshBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  refreshIcon: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-
-  noticeBanner: {
-    marginBottom: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#FFD16628',
-    backgroundColor: '#FFD16610',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-
-  noticeText: {
-    color: '#FFD166',
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-
-  heroSection: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 24,
-  },
-
-  heroTemp: {
-    color: '#E8EDF5',
-    fontSize: 72,
     fontWeight: '900',
-    letterSpacing: -3,
-    marginTop: 14,
-    lineHeight: 80,
-  },
-
-  heroCondition: {
-    color: '#8A9BB0',
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 4,
-    letterSpacing: 0.3,
-  },
-
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-  },
-
-  metaText: {
-    color: '#5A6A82',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  metaDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: '#2E3E52',
-  },
-
-  rainCard: {
-    marginBottom: 14,
-    borderRadius: 22,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-
-  rainCardRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-  },
-
-  rainTimerBlock: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-  },
-
-  rainTimerDivider: {
-    width: 1,
-    backgroundColor: '#ffffff14',
-    marginVertical: 12,
-  },
-
-  rainTimerIcon: {
-    fontSize: 22,
-    marginBottom: 6,
-  },
-
-  rainTimerLabel: {
-    color: '#8A9BB0',
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: '800',
+    letterSpacing: 2.5,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 4,
-    textAlign: 'center',
   },
-
-  rainTimerClock: {
+  locationText: {
     color: '#E8EDF5',
-    fontSize: 17,
-    lineHeight: 21,
+    fontSize: 21,
     fontWeight: '900',
-    textAlign: 'center',
+    marginTop: 4,
   },
-
-  rainTimerClockSmall: {
-    fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 2,
+  refreshBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF08',
   },
-
-  rainChanceLabel: {
-    textAlign: 'center',
-    color: '#5A6A82',
-    fontSize: 12,
-    fontWeight: '700',
-    paddingBottom: 12,
+  refreshIcon: {
+    fontSize: 25,
+    fontWeight: '900',
   },
-
-  infoRow: {
-    flexDirection: 'row',
-    gap: 10,
+  noticeBox: {
+    backgroundColor: '#FFFFFF0D',
+    borderWidth: 1,
+    borderColor: '#FFFFFF12',
+    borderRadius: 16,
+    padding: 12,
     marginBottom: 12,
   },
-
-  infoCard: {
-    flex: 1,
+  noticeText: {
+    color: '#CAD6E6',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cachedText: {
+    color: '#FFD166',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  heroCard: {
+    borderRadius: 32,
+    padding: 22,
+    backgroundColor: '#FFFFFF08',
     borderWidth: 1,
-    borderRadius: 22,
-    paddingVertical: 16,
+    borderColor: '#FFFFFF12',
     alignItems: 'center',
+    marginBottom: 16,
   },
-
-  infoEmoji: {
-    fontSize: 22,
-    marginBottom: 7,
-  },
-
-  infoValue: {
+  tempText: {
     color: '#E8EDF5',
-    fontSize: 16,
+    fontSize: 74,
+    lineHeight: 82,
+    fontWeight: '900',
+    marginTop: -6,
+  },
+  conditionText: {
+    fontSize: 21,
     fontWeight: '900',
   },
-
-  infoLabel: {
+  updatedText: {
     color: '#5A6A82',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
-    marginTop: 3,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginTop: 5,
+    marginBottom: 18,
   },
-
+  rainCard: {
+    width: '100%',
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 16,
+    marginTop: 4,
+  },
+  rainCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rainTimerBlock: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  rainTimerDivider: {
+    width: 1,
+    height: 64,
+    backgroundColor: '#FFFFFF18',
+    marginHorizontal: 12,
+  },
+  rainTimerIcon: {
+    fontSize: 25,
+    marginBottom: 5,
+  },
+  rainTimerLabel: {
+    color: '#8A9BB0',
+    fontSize: 11,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  rainTimerClock: {
+    color: '#E8EDF5',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  rainTimerClockSmall: {
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  rainChanceLabel: {
+    color: '#8A9BB0',
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 12,
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  metricCard: {
+    width: '48.5%',
+    borderRadius: 22,
+    padding: 15,
+    backgroundColor: '#FFFFFF08',
+    borderWidth: 1,
+    borderColor: '#FFFFFF12',
+  },
+  metricLabel: {
+    color: '#8A9BB0',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  metricValue: {
+    fontSize: 27,
+    fontWeight: '900',
+    marginTop: 6,
+  },
+  metricSub: {
+    color: '#5A6A82',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  todayCard: {
+    borderRadius: 26,
+    padding: 17,
+    backgroundColor: '#FFFFFF08',
+    borderWidth: 1,
+    borderColor: '#FFFFFF12',
+    marginBottom: 18,
+  },
+  todayRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  todayBadge: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
   sunRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 12,
   },
-
-  sunCard: {
+  sunBox: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderRadius: 18,
+    padding: 13,
+    backgroundColor: '#0000001E',
   },
-
+  sunIcon: {
+    fontSize: 23,
+  },
   sunLabel: {
-    color: '#5A6A82',
-    fontSize: 10,
+    color: '#8A9BB0',
+    fontSize: 11,
     fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 3,
+    marginTop: 6,
   },
-
-  sunTime: {
+  sunValue: {
     color: '#E8EDF5',
     fontSize: 15,
     fontWeight: '900',
+    marginTop: 2,
   },
-
-  healthRow: {
-    flexDirection: 'row',
-    gap: 10,
+  sectionHeader: {
+    marginTop: 4,
     marginBottom: 12,
   },
-
-  healthCard: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 22,
-    padding: 12,
-    minHeight: 138,
+  sectionTitle: {
+    color: '#E8EDF5',
+    fontSize: 18,
+    fontWeight: '900',
   },
-
-  healthTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-
-  healthEmoji: {
-    fontSize: 22,
-    marginRight: 8,
-  },
-
-  healthTextBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  healthLabel: {
+  sectionSub: {
     color: '#5A6A82',
-    fontSize: 9,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 3,
-  },
-
-  healthStatus: {
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '900',
-    flexShrink: 1,
-  },
-
-  healthValue: {
-    color: '#E8EDF5',
-    fontSize: 22,
-    fontWeight: '900',
-    marginLeft: 6,
-    minWidth: 34,
-    textAlign: 'right',
-  },
-
-  healthMessage: {
-    color: '#E8EDF5',
     fontSize: 12,
     fontWeight: '700',
-    lineHeight: 17,
-    marginBottom: 8,
+    marginTop: 2,
   },
-
-  healthSmallText: {
-    color: '#5A6A82',
-    fontSize: 10,
-    fontWeight: '700',
-    lineHeight: 15,
-  },
-
-  forecastCard: {
-    borderWidth: 1,
-    borderRadius: 26,
-    paddingTop: 18,
-    paddingBottom: 18,
-    paddingLeft: 18,
-    marginBottom: 20,
-  },
-
-  forecastHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 14,
+  hourlyList: {
+    gap: 10,
     paddingRight: 18,
+    paddingBottom: 18,
   },
-
-  forecastTitle: {
-    color: '#E8EDF5',
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-  },
-
-  forecastSub: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-
   hourCard: {
     width: 74,
     paddingVertical: 12,
@@ -2214,33 +1809,65 @@ const st = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
   },
-
   hourLabel: {
     color: '#5A6A82',
     fontSize: 11,
     fontWeight: '800',
   },
-
+  hourIcon: {
+    fontSize: 25,
+    marginTop: 8,
+  },
   hourTemp: {
     color: '#E8EDF5',
     fontSize: 16,
     fontWeight: '900',
+    marginTop: 5,
   },
-
   hourRain: {
     color: '#5A6A82',
     fontSize: 11,
     fontWeight: '700',
     marginTop: 3,
   },
-
   hourMm: {
     color: '#6CD9FF',
     fontSize: 10,
     fontWeight: '700',
     marginTop: 2,
   },
-
+  infoCard: {
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: '#FFFFFF08',
+    borderWidth: 1,
+    borderColor: '#FFFFFF12',
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  infoTitle: {
+    color: '#8A9BB0',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  infoLabel: {
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  infoMessage: {
+    color: '#5A6A82',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  infoValue: {
+    fontSize: 32,
+    fontWeight: '900',
+    alignSelf: 'center',
+  },
   footer: {
     textAlign: 'center',
     color: '#5A6A82',
@@ -2249,5 +1876,49 @@ const st = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     opacity: 0.55,
+    marginTop: 8,
+  },
+  errorIcon: {
+    fontSize: 44,
+    marginBottom: 14,
+  },
+  errorTitle: {
+    color: '#E8EDF5',
+    fontSize: 22,
+    fontWeight: '900',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#8A9BB0',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 18,
+  },
+  primaryBtn: {
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+    borderRadius: 18,
+    marginBottom: 10,
+  },
+  primaryBtnText: {
+    color: '#08111F',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  secondaryBtn: {
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF10',
+    borderWidth: 1,
+    borderColor: '#FFFFFF14',
+  },
+  secondaryBtnText: {
+    color: '#E8EDF5',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
