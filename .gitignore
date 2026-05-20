@@ -1,0 +1,16 @@
+
+# Android build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/app/.cxx/
+
+# APK / AAB files
+*.apk
+*.aab
+
+# Native build outputs
+*.so
+
+# Node modules
+node_modules/
