@@ -29,14 +29,14 @@ const RAIN_ALERT_CHANNEL_ID = 'weather-alerts';
 const MIN_REFRESH_GAP_MS = 10 * 60 * 1000;
 const RAIN_STOP_THRESHOLD = 20;
 const MIN_REAL_RAIN_MM = 0.3;
-const FUTURE_RAIN_MIN_CHANCE = 70;
-const FUTURE_RAIN_MIN_MM = 0.2;
+const FUTURE_RAIN_MIN_CHANCE = 85;
+const FUTURE_RAIN_MIN_MM = 0.6;
 
 const WMO_MAP = {
   0: { label: 'DOMBU', emoji: '☀️', art: 'sunny' },
-  1: { label: 'ONTHE DOMBU', emoji: '🌤️', art: 'sunny' },
-  2: { label: 'ONTHE MUGAL', emoji: '⛅', art: 'cloudy' },
-  3: { label: 'MODA', emoji: '☁️', art: 'cloudy' },
+  1: { label: 'ONTHE DOMBU', emoji: '🌤️', art: 'partlyCloudy' },
+  2: { label: 'ONTHE MUGAL', emoji: '🌤️', art: 'partlyCloudy' },
+  3: { label: 'MUGAL', emoji: '☁️', art: 'cloudy' },
   45: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
   48: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
 
@@ -75,7 +75,9 @@ const RAIN_CODES = [
 
 const ART_EMOJI = {
   sunny: '☀️',
-  cloudy: '⛅',
+  partlyCloudy: '🌤️',
+  cloudy: '☁️',
+  clearNight: '🌙',
   fog: '🌫️',
   rain: '🌧️',
   storm: '⛈️',
@@ -84,42 +86,104 @@ const ART_EMOJI = {
 
 const isRainCode = code => RAIN_CODES.includes(Number(code));
 const hasRealRain = value => Number(value || 0) >= MIN_REAL_RAIN_MM;
+
 const isActualRainNow = (code, rainAmount) =>
   isRainCode(code) && hasRealRain(rainAmount);
 
 const isFutureRainStrong = item => {
   const chance = Number(item?.rainChance ?? 0);
   const precipMm = Number(item?.precipMm ?? 0);
+  const humidity = Number(item?.humidity ?? 0);
 
-  return chance >= FUTURE_RAIN_MIN_CHANCE || precipMm >= FUTURE_RAIN_MIN_MM;
+  return (
+    chance >= FUTURE_RAIN_MIN_CHANCE &&
+    precipMm >= FUTURE_RAIN_MIN_MM &&
+    humidity >= 75
+  );
 };
 
 const getWeatherInfo = code =>
-  WMO_MAP[Number(code)] || { label: 'MODA', emoji: '☁️', art: 'cloudy' };
+  WMO_MAP[Number(code)] || { label: 'MUGAL', emoji: '☁️', art: 'cloudy' };
 
-const getSafeWeatherInfo = (code, rainAmount = 0) => {
-  if (isRainCode(code) && !hasRealRain(rainAmount)) {
+const getSmartWeatherInfo = ({
+  code,
+  rainAmount = 0,
+  cloudCover = 0,
+  isDay = 1,
+}) => {
+  const weatherCode = Number(code);
+  const clouds = Number(cloudCover || 0);
+  const daytime = Number(isDay) === 1;
+
+  if (isRainCode(weatherCode) && hasRealRain(rainAmount)) {
+    return getWeatherInfo(weatherCode);
+  }
+
+  if (isRainCode(weatherCode) && !hasRealRain(rainAmount)) {
+    if (clouds >= 95 && !daytime) return WMO_MAP[3];
+    if (clouds >= 90 && daytime && Number(rainAmount || 0) >= 0.2) {
+      return WMO_MAP[3];
+    }
+    if (clouds >= 35) return WMO_MAP[2];
+    return daytime ? WMO_MAP[1] : WMO_MAP[3];
+  }
+
+  if (weatherCode === 0) {
+    if (clouds >= 35) return WMO_MAP[2];
+    return WMO_MAP[0];
+  }
+
+  if (weatherCode === 1) {
+    if (clouds >= 55) return WMO_MAP[2];
+    return WMO_MAP[1];
+  }
+
+  if (weatherCode === 2) {
+    if (clouds >= 80) return WMO_MAP[3];
+    return WMO_MAP[2];
+  }
+
+  if (weatherCode === 3) {
+    if (daytime && clouds < 75) return WMO_MAP[2];
     return WMO_MAP[3];
   }
 
-  return getWeatherInfo(code);
+  return getWeatherInfo(weatherCode);
 };
 
 const getHourlyWeatherInfo = item => {
   if (!item) return WMO_MAP[3];
 
-  const chance = Number(item?.rainChance ?? 0);
+  const code = Number(item?.code);
   const precipMm = Number(item?.precipMm ?? 0);
+  const hour = new Date(item.time).getHours();
+  const isNight = hour >= 18 || hour < 6;
 
-  if (chance >= FUTURE_RAIN_MIN_CHANCE || precipMm >= FUTURE_RAIN_MIN_MM) {
-    return getWeatherInfo(item?.code);
+  if ([95, 96, 99].includes(code) && precipMm >= 2) {
+    return getWeatherInfo(code);
   }
 
-  if (isRainCode(item?.code) && precipMm < MIN_REAL_RAIN_MM) {
+  if (precipMm >= MIN_REAL_RAIN_MM) {
+    return {
+      label: 'ONTHE BARSA',
+      emoji: '🌦️',
+      art: 'rain',
+    };
+  }
+
+  if (isRainCode(code) && precipMm < MIN_REAL_RAIN_MM) {
     return WMO_MAP[3];
   }
 
-  return getWeatherInfo(item?.code);
+  if (isNight && [0, 1].includes(code)) {
+    return { label: 'DOMBU', emoji: '🌙', art: 'clearNight' };
+  }
+
+  if (isNight && code === 2) {
+    return { label: 'ONTHE MUGAL', emoji: '☁️', art: 'cloudy' };
+  }
+
+  return getWeatherInfo(code);
 };
 
 const toNumberOrNull = value => {
@@ -384,7 +448,7 @@ const findRainStopSlot = hourlyList => {
 };
 
 const buildRainStopLabel = stopTime => {
-  if (!stopTime) return 'Rain may continue today';
+  if (!stopTime) return 'Rain possible later today';
 
   const now = Date.now();
   const stopMs = Number(stopTime);
@@ -575,10 +639,10 @@ const syncRainNotification = async weatherPayload => {
           body: rainPrediction.stopTime
             ? `Barsa ${
                 rainPrediction.startTimeLabel
-              } d shuru avu, ${toClockTime(
+              } d barpuna saadhyate, ${toClockTime(
                 rainPrediction.stopTime,
-              )} g clear avu.`
-            : `Barsa ${rainPrediction.startTimeLabel} d shuru avu. Rain may continue today.`,
+              )} g kammi avu.`
+            : `Barsa ${rainPrediction.startTimeLabel} d barpuna saadhyate.`,
           android: {
             channelId,
             color: '#6CD9FF',
@@ -595,7 +659,6 @@ const syncRainNotification = async weatherPayload => {
     }
   } catch {}
 };
-
 const requestLocationPermission = async () => {
   if (Platform.OS === 'ios') {
     const auth = await Geolocation.requestAuthorization('whenInUse');
@@ -769,8 +832,8 @@ const getCityName = async (lat, lon) => {
 const getWeatherData = async (lat, lon) => {
   const response = await fetch(
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,rain,is_day` +
-      `&hourly=temperature_2m,weather_code,precipitation_probability,precipitation` +
+      `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,rain,is_day,cloud_cover` +
+      `&hourly=temperature_2m,relative_humidity_2m,weather_code,precipitation_probability,precipitation` +
       `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,precipitation_sum,uv_index_max` +
       `&forecast_days=2&timezone=auto`,
   );
@@ -817,6 +880,7 @@ const buildHourlyList = hourly => {
     timestamp: new Date(time).getTime(),
     label: formatHour(time),
     temp: Math.round(hourly.temperature_2m[index]),
+    humidity: hourly.relative_humidity_2m?.[index] ?? 0,
     code: hourly.weather_code[index],
     rainChance: hourly.precipitation_probability?.[index] ?? 0,
     precipMm: hourly.precipitation?.[index] ?? 0,
@@ -982,7 +1046,7 @@ const RainTimerCard = ({ prediction, accent }) => {
               adjustsFontSizeToFit
               minimumFontScale={0.78}
             >
-              {prediction.stopTimeLabel || 'Rain may continue today'}
+              {prediction.stopTimeLabel || 'Rain possible later today'}
             </Text>
           </View>
         </View>
@@ -995,7 +1059,7 @@ const RainTimerCard = ({ prediction, accent }) => {
       <View style={st.rainCardRow}>
         <View style={st.rainTimerBlock}>
           <Text style={st.rainTimerIcon}>🕐</Text>
-          <Text style={st.rainTimerLabel}>Rain starts</Text>
+          <Text style={st.rainTimerLabel}>Rain possible around</Text>
           <Text style={[st.rainTimerClock, { color: accent }]}>
             {prediction.startTimeLabel}
           </Text>
@@ -1016,14 +1080,14 @@ const RainTimerCard = ({ prediction, accent }) => {
             adjustsFontSizeToFit
             minimumFontScale={0.78}
           >
-            {prediction.stopTimeLabel || 'Rain may continue today'}
+            {prediction.stopTimeLabel || 'Rain possible later today'}
           </Text>
         </View>
       </View>
 
       {prediction.chance > 0 && (
         <Text style={st.rainChanceLabel}>
-          {prediction.chance}% chance with rain amount
+          {prediction.chance}% chance, expected rain amount
         </Text>
       )}
     </View>
@@ -1083,11 +1147,22 @@ export default function Weather() {
   const currentCode = weather?.current?.weather_code ?? 3;
   const isDay = weather?.current?.is_day !== 0;
 
+  const smartThemeInfo = weather?.current
+    ? getSmartWeatherInfo({
+        code: weather.current.weather_code,
+        rainAmount: weather.currentRain,
+        cloudCover: weather.current.cloud_cover,
+        isDay: weather.current.is_day,
+      })
+    : WMO_MAP[3];
+
   const safeThemeCode =
-    weather && isActualRainNow(currentCode, weather?.currentRain)
+    smartThemeInfo.art === 'rain' || smartThemeInfo.art === 'storm'
       ? currentCode
-      : isRainCode(currentCode)
+      : smartThemeInfo.label === 'MUGAL'
       ? 3
+      : smartThemeInfo.label === 'ONTHE MUGAL'
+      ? 2
       : currentCode;
 
   const theme = useMemo(
@@ -1110,10 +1185,12 @@ export default function Weather() {
   const currentInfo = useMemo(() => {
     if (!weather?.current) return getWeatherInfo(3);
 
-    return getSafeWeatherInfo(
-      weather.current.weather_code,
-      weather.currentRain,
-    );
+    return getSmartWeatherInfo({
+      code: weather.current.weather_code,
+      rainAmount: weather.currentRain,
+      cloudCover: weather.current.cloud_cover,
+      isDay: weather.current.is_day,
+    });
   }, [weather]);
 
   const aqiInfo = useMemo(
@@ -1217,6 +1294,29 @@ export default function Weather() {
         longitude,
       });
 
+      // console.log('===== NAMMA WEATHER DEBUG =====');
+      // console.log('Current Code:', payload.current?.weather_code);
+      // console.log('Cloud Cover:', payload.current?.cloud_cover);
+      // console.log('Current Rain:', payload.currentRain);
+      // console.log('Current Humidity:', payload.current?.relative_humidity_2m);
+      // console.log(
+      //   'Smart Current Info:',
+      //   getSmartWeatherInfo({
+      //     code: payload.current?.weather_code,
+      //     rainAmount: payload.currentRain,
+      //     cloudCover: payload.current?.cloud_cover,
+      //     isDay: payload.current?.is_day,
+      //   }),
+      // );
+      // console.log(
+      //   'Prediction:',
+      //   predictRain(
+      //     payload.hourlyList,
+      //     payload.current?.weather_code,
+      //     payload.currentRain,
+      //   ),
+      // );
+      // console.log('================================');
       setWeather(payload);
       setUsingCached(false);
       setNotice('');
@@ -1293,8 +1393,9 @@ export default function Weather() {
     return () => {
       subscription.remove();
     };
-  }, []);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const openSettings = () => {
     Linking.openSettings().catch(() => {});
   };
@@ -1384,7 +1485,7 @@ export default function Weather() {
             <View style={{ flex: 1 }}>
               <Text style={st.appTitle}>NAMMA WEATHER</Text>
               <Text style={st.locationText} numberOfLines={1}>
-                📍 {weather?.cityName || 'Your Location'}
+                🧭 {weather?.cityName || 'Your Location'}
               </Text>
             </View>
 
@@ -1430,7 +1531,7 @@ export default function Weather() {
             <MetricCard
               label="Feels Like"
               value={`${feels}°`}
-              sub="Body temp feel"
+              sub="Feels hotter"
               accent={theme.accent}
             />
             <MetricCard
@@ -1568,16 +1669,9 @@ export default function Weather() {
 }
 
 const st = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  center: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scrollContent: {
-    paddingHorizontal: 18,
-  },
+  screen: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  scrollContent: { paddingHorizontal: 18 },
   loadingText: {
     color: '#E8EDF5',
     marginTop: 14,
@@ -1611,10 +1705,7 @@ const st = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF08',
   },
-  refreshIcon: {
-    fontSize: 25,
-    fontWeight: '900',
-  },
+  refreshIcon: { fontSize: 25, fontWeight: '900' },
   noticeBox: {
     backgroundColor: '#FFFFFF0D',
     borderWidth: 1,
@@ -1623,11 +1714,7 @@ const st = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
   },
-  noticeText: {
-    color: '#CAD6E6',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  noticeText: { color: '#CAD6E6', fontSize: 12, fontWeight: '700' },
   cachedText: {
     color: '#FFD166',
     fontSize: 11,
@@ -1650,10 +1737,7 @@ const st = StyleSheet.create({
     fontWeight: '900',
     marginTop: -6,
   },
-  conditionText: {
-    fontSize: 21,
-    fontWeight: '900',
-  },
+  conditionText: { fontSize: 21, fontWeight: '900' },
   updatedText: {
     color: '#5A6A82',
     fontSize: 12,
@@ -1668,24 +1752,15 @@ const st = StyleSheet.create({
     padding: 16,
     marginTop: 4,
   },
-  rainCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rainTimerBlock: {
-    flex: 1,
-    alignItems: 'center',
-  },
+  rainCardRow: { flexDirection: 'row', alignItems: 'center' },
+  rainTimerBlock: { flex: 1, alignItems: 'center' },
   rainTimerDivider: {
     width: 1,
     height: 64,
     backgroundColor: '#FFFFFF18',
     marginHorizontal: 12,
   },
-  rainTimerIcon: {
-    fontSize: 25,
-    marginBottom: 5,
-  },
+  rainTimerIcon: { fontSize: 25, marginBottom: 5 },
   rainTimerLabel: {
     color: '#8A9BB0',
     fontSize: 11,
@@ -1698,10 +1773,7 @@ const st = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
   },
-  rainTimerClockSmall: {
-    fontSize: 14,
-    lineHeight: 18,
-  },
+  rainTimerClockSmall: { fontSize: 14, lineHeight: 18 },
   rainChanceLabel: {
     color: '#8A9BB0',
     textAlign: 'center',
@@ -1712,27 +1784,20 @@ const st = StyleSheet.create({
   metricsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
     marginBottom: 16,
   },
   metricCard: {
-    width: '48.5%',
+    width: '48%',
     borderRadius: 22,
     padding: 15,
     backgroundColor: '#FFFFFF08',
     borderWidth: 1,
     borderColor: '#FFFFFF12',
+    marginBottom: 10,
   },
-  metricLabel: {
-    color: '#8A9BB0',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  metricValue: {
-    fontSize: 27,
-    fontWeight: '900',
-    marginTop: 6,
-  },
+  metricLabel: { color: '#8A9BB0', fontSize: 12, fontWeight: '800' },
+  metricValue: { fontSize: 27, fontWeight: '900', marginTop: 6 },
   metricSub: {
     color: '#5A6A82',
     fontSize: 11,
@@ -1753,23 +1818,15 @@ const st = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 14,
   },
-  todayBadge: {
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  sunRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
+  todayBadge: { fontSize: 18, fontWeight: '900' },
+  sunRow: { flexDirection: 'row', gap: 10 },
   sunBox: {
     flex: 1,
     borderRadius: 18,
     padding: 13,
     backgroundColor: '#0000001E',
   },
-  sunIcon: {
-    fontSize: 23,
-  },
+  sunIcon: { fontSize: 23 },
   sunLabel: {
     color: '#8A9BB0',
     fontSize: 11,
@@ -1782,26 +1839,15 @@ const st = StyleSheet.create({
     fontWeight: '900',
     marginTop: 2,
   },
-  sectionHeader: {
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: '#E8EDF5',
-    fontSize: 18,
-    fontWeight: '900',
-  },
+  sectionHeader: { marginTop: 4, marginBottom: 12 },
+  sectionTitle: { color: '#E8EDF5', fontSize: 18, fontWeight: '900' },
   sectionSub: {
     color: '#5A6A82',
     fontSize: 12,
     fontWeight: '700',
     marginTop: 2,
   },
-  hourlyList: {
-    gap: 10,
-    paddingRight: 18,
-    paddingBottom: 18,
-  },
+  hourlyList: { gap: 10, paddingRight: 18, paddingBottom: 18 },
   hourCard: {
     width: 74,
     paddingVertical: 12,
@@ -1809,15 +1855,8 @@ const st = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
   },
-  hourLabel: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  hourIcon: {
-    fontSize: 25,
-    marginTop: 8,
-  },
+  hourLabel: { color: '#5A6A82', fontSize: 11, fontWeight: '800' },
+  hourIcon: { fontSize: 25, marginTop: 8 },
   hourTemp: {
     color: '#E8EDF5',
     fontSize: 16,
@@ -1847,27 +1886,15 @@ const st = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  infoTitle: {
-    color: '#8A9BB0',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  infoLabel: {
-    fontSize: 20,
-    fontWeight: '900',
-    marginTop: 3,
-  },
+  infoTitle: { color: '#8A9BB0', fontSize: 12, fontWeight: '800' },
+  infoLabel: { fontSize: 20, fontWeight: '900', marginTop: 3 },
   infoMessage: {
     color: '#5A6A82',
     fontSize: 11,
     fontWeight: '700',
     marginTop: 4,
   },
-  infoValue: {
-    fontSize: 32,
-    fontWeight: '900',
-    alignSelf: 'center',
-  },
+  infoValue: { fontSize: 32, fontWeight: '900', alignSelf: 'center' },
   footer: {
     textAlign: 'center',
     color: '#5A6A82',
@@ -1875,13 +1902,10 @@ const st = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    opacity: 0.55,
+    opacity: 0.25,
     marginTop: 8,
   },
-  errorIcon: {
-    fontSize: 44,
-    marginBottom: 14,
-  },
+  errorIcon: { fontSize: 44, marginBottom: 14 },
   errorTitle: {
     color: '#E8EDF5',
     fontSize: 22,
@@ -1903,11 +1927,7 @@ const st = StyleSheet.create({
     borderRadius: 18,
     marginBottom: 10,
   },
-  primaryBtnText: {
-    color: '#08111F',
-    fontSize: 14,
-    fontWeight: '900',
-  },
+  primaryBtnText: { color: '#08111F', fontSize: 14, fontWeight: '900' },
   secondaryBtn: {
     paddingHorizontal: 22,
     paddingVertical: 13,
@@ -1916,9 +1936,5 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FFFFFF14',
   },
-  secondaryBtnText: {
-    color: '#E8EDF5',
-    fontSize: 14,
-    fontWeight: '900',
-  },
+  secondaryBtnText: { color: '#E8EDF5', fontSize: 14, fontWeight: '900' },
 });
