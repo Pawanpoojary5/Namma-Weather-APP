@@ -9,7 +9,6 @@ import {
   RefreshControl,
   ScrollView,
   StatusBar,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -18,6 +17,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Geolocation from 'react-native-geolocation-service';
 import notifee, { AndroidImportance, TriggerType } from '@notifee/react-native';
+
+import { st } from './WeatherStyle';
+import { SkyBackground, RainSystem, WeatherArt } from './WeatherAnimations';
 
 const WEATHER_CACHE_KEY = 'wx:weather';
 const COORDS_CACHE_KEY = 'wx:coords';
@@ -28,9 +30,14 @@ const RAIN_ALERT_CHANNEL_ID = 'weather-alerts';
 
 const MIN_REFRESH_GAP_MS = 10 * 60 * 1000;
 const RAIN_STOP_THRESHOLD = 20;
-const MIN_REAL_RAIN_MM = 0.3;
-const FUTURE_RAIN_MIN_CHANCE = 85;
+
+const MIN_REAL_RAIN_MM = 3.5;
+const MIN_FORECAST_RAIN_MM = 0.5;
+
+const FUTURE_RAIN_MIN_CHANCE = 70;
 const FUTURE_RAIN_MIN_MM = 0.6;
+
+const THUNDER_MIN_RAIN_MM = 2.0;
 
 const WMO_MAP = {
   0: { label: 'DOMBU', emoji: '☀️', art: 'sunny' },
@@ -73,22 +80,13 @@ const RAIN_CODES = [
   51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 85, 86, 95, 96, 99,
 ];
 
-const ART_EMOJI = {
-  sunny: '☀️',
-  partlyCloudy: '🌤️',
-  cloudy: '☁️',
-  clearNight: '🌙',
-  fog: '🌫️',
-  rain: '🌧️',
-  storm: '⛈️',
-  snow: '❄️',
-};
+const THUNDER_CODES = [82, 95, 96, 99];
 
 const isRainCode = code => RAIN_CODES.includes(Number(code));
-const hasRealRain = value => Number(value || 0) >= MIN_REAL_RAIN_MM;
+const isThunderCode = code => THUNDER_CODES.includes(Number(code));
 
 const isActualRainNow = (code, rainAmount) =>
-  isRainCode(code) && hasRealRain(rainAmount);
+  isRainCode(Number(code)) && Number(rainAmount || 0) >= MIN_REAL_RAIN_MM;
 
 const isFutureRainStrong = item => {
   const chance = Number(item?.rainChance ?? 0);
@@ -112,29 +110,58 @@ const getSmartWeatherInfo = ({
   isDay = 1,
 }) => {
   const weatherCode = Number(code);
+  const precipMm = Number(rainAmount || 0);
   const clouds = Number(cloudCover || 0);
   const daytime = Number(isDay) === 1;
 
-  if (isRainCode(weatherCode) && hasRealRain(rainAmount)) {
+  if (precipMm === 0) {
+    if (!daytime) {
+      if (clouds >= 80) return WMO_MAP[3];
+      if (clouds >= 35) return WMO_MAP[2];
+      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
+    }
+
+    if (clouds >= 80) return WMO_MAP[3];
+    if (clouds >= 40) return WMO_MAP[2];
+    if (clouds >= 15) return WMO_MAP[1];
+    return WMO_MAP[0];
+  }
+
+  if (isThunderCode(weatherCode)) {
+    if (precipMm >= THUNDER_MIN_RAIN_MM) {
+      return getWeatherInfo(weatherCode);
+    }
+
+    if (precipMm >= MIN_REAL_RAIN_MM) {
+      return WMO_MAP[61];
+    }
+
+    if (!daytime) return WMO_MAP[3];
+    return clouds >= 40 ? WMO_MAP[2] : WMO_MAP[1];
+  }
+
+  if (isRainCode(weatherCode) && precipMm >= MIN_REAL_RAIN_MM) {
     return getWeatherInfo(weatherCode);
   }
 
-  if (isRainCode(weatherCode) && !hasRealRain(rainAmount)) {
-    if (clouds >= 95 && !daytime) return WMO_MAP[3];
-    if (clouds >= 90 && daytime && Number(rainAmount || 0) >= 0.2) {
-      return WMO_MAP[3];
-    }
+  if (isRainCode(weatherCode) && precipMm < MIN_REAL_RAIN_MM) {
+    if (!daytime) return WMO_MAP[3];
+    if (clouds >= 80) return WMO_MAP[3];
     if (clouds >= 35) return WMO_MAP[2];
-    return daytime ? WMO_MAP[1] : WMO_MAP[3];
+    return WMO_MAP[1];
   }
 
   if (weatherCode === 0) {
     if (clouds >= 35) return WMO_MAP[2];
+    if (!daytime) {
+      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
+    }
     return WMO_MAP[0];
   }
 
   if (weatherCode === 1) {
     if (clouds >= 55) return WMO_MAP[2];
+    if (!daytime) return WMO_MAP[3];
     return WMO_MAP[1];
   }
 
@@ -156,32 +183,50 @@ const getHourlyWeatherInfo = item => {
 
   const code = Number(item?.code);
   const precipMm = Number(item?.precipMm ?? 0);
+  const rainChance = Number(item?.rainChance ?? 0);
   const hour = new Date(item.time).getHours();
   const isNight = hour >= 18 || hour < 6;
 
-  if ([95, 96, 99].includes(code) && precipMm >= 2) {
-    return getWeatherInfo(code);
+  if (precipMm === 0) {
+    if (isNight) {
+      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
+    }
+    if (rainChance >= 40) return WMO_MAP[2];
+    return WMO_MAP[0];
   }
 
-  if (precipMm >= MIN_REAL_RAIN_MM) {
-    return {
-      label: 'ONTHE BARSA',
-      emoji: '🌦️',
-      art: 'rain',
-    };
+  if (isThunderCode(code)) {
+    if (precipMm >= THUNDER_MIN_RAIN_MM) return getWeatherInfo(code);
+
+    if (precipMm >= MIN_FORECAST_RAIN_MM) {
+      return isNight
+        ? { label: 'ONTHE BARSA', emoji: '🌧️', art: 'rain' }
+        : { label: 'ONTHE BARSA', emoji: '🌦️', art: 'rain' };
+    }
+
+    return isNight
+      ? { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' }
+      : WMO_MAP[1];
   }
 
-  if (isRainCode(code) && precipMm < MIN_REAL_RAIN_MM) {
-    return WMO_MAP[3];
+  if (isRainCode(code) && precipMm >= MIN_FORECAST_RAIN_MM) {
+    return isNight
+      ? { label: 'ONTHE BARSA', emoji: '🌧️', art: 'rain' }
+      : { label: 'ONTHE BARSA', emoji: '🌦️', art: 'rain' };
+  }
+
+  if (isRainCode(code) && precipMm < MIN_FORECAST_RAIN_MM) {
+    return isNight
+      ? { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' }
+      : WMO_MAP[1];
   }
 
   if (isNight && [0, 1].includes(code)) {
-    return { label: 'DOMBU', emoji: '🌙', art: 'clearNight' };
+    return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
   }
 
-  if (isNight && code === 2) {
-    return { label: 'ONTHE MUGAL', emoji: '☁️', art: 'cloudy' };
-  }
+  if (isNight && code === 2) return WMO_MAP[3];
+  if (!isNight && code === 0) return WMO_MAP[0];
 
   return getWeatherInfo(code);
 };
@@ -206,7 +251,6 @@ const toClockTime = ts =>
 
 const formatTime = dt => {
   if (!dt) return '--';
-
   return new Date(dt).toLocaleTimeString('en-IN', {
     hour: 'numeric',
     minute: '2-digit',
@@ -257,7 +301,6 @@ const getNearestHourlyIndex = times => {
 
   times.forEach((time, index) => {
     const diff = Math.abs(new Date(time).getTime() - now);
-
     if (diff < bestDiff) {
       bestDiff = diff;
       bestIndex = index;
@@ -268,17 +311,12 @@ const getNearestHourlyIndex = times => {
 };
 
 const getTheme = (code, isDay) => {
-  if (!isDay) return { bg: '#080D1A', accent: '#8EA7FF' };
-
-  if (isRainCode(code)) {
-    return { bg: '#071927', accent: '#6CD9FF' };
-  }
-
+  if (!isDay) return { bg: '#0A0F1C', accent: '#A5B4FC' };
+  if (isRainCode(code)) return { bg: '#0C1A2B', accent: '#67E8F9' };
   if ([0, 1].includes(Number(code))) {
-    return { bg: '#0A1728', accent: '#FFD166' };
+    return { bg: '#0F172A', accent: '#FACC15' };
   }
-
-  return { bg: '#0A0F1E', accent: '#4DFFB4' };
+  return { bg: '#0A0F1C', accent: '#67E8F9' };
 };
 
 const getAQIInfo = value => {
@@ -288,7 +326,7 @@ const getAQIInfo = value => {
     return {
       value: '--',
       label: 'Unavailable',
-      color: '#8A9BB0',
+      color: '#94A3B8',
       message: 'AQI data not available now',
     };
   }
@@ -299,7 +337,7 @@ const getAQIInfo = value => {
     return {
       value: aqi,
       label: 'Good',
-      color: '#4DFFB4',
+      color: '#4ADE80',
       message: 'Air quality is healthy',
     };
   }
@@ -308,7 +346,7 @@ const getAQIInfo = value => {
     return {
       value: aqi,
       label: 'Moderate',
-      color: '#FFD166',
+      color: '#FACC15',
       message: 'Acceptable air quality',
     };
   }
@@ -317,7 +355,7 @@ const getAQIInfo = value => {
     return {
       value: aqi,
       label: 'Sensitive',
-      color: '#FFB347',
+      color: '#FB923C',
       message: 'Sensitive people be careful',
     };
   }
@@ -326,7 +364,7 @@ const getAQIInfo = value => {
     return {
       value: aqi,
       label: 'Unhealthy',
-      color: '#FF6B6B',
+      color: '#F87171',
       message: 'Avoid long outdoor activity',
     };
   }
@@ -343,7 +381,7 @@ const getAQIInfo = value => {
   return {
     value: aqi,
     label: 'Hazardous',
-    color: '#FF4D6D',
+    color: '#FB7185',
     message: 'Stay indoors if possible',
   };
 };
@@ -355,7 +393,7 @@ const getUVInfo = value => {
     return {
       value: '--',
       label: 'Unavailable',
-      color: '#8A9BB0',
+      color: '#94A3B8',
       message: 'UV data not available now',
     };
   }
@@ -366,7 +404,7 @@ const getUVInfo = value => {
     return {
       value: uv,
       label: 'Low',
-      color: '#4DFFB4',
+      color: '#4ADE80',
       message: 'Safe for normal outdoor time',
     };
   }
@@ -375,7 +413,7 @@ const getUVInfo = value => {
     return {
       value: uv,
       label: 'Moderate',
-      color: '#FFD166',
+      color: '#FACC15',
       message: 'Use sunscreen if outside longer',
     };
   }
@@ -384,7 +422,7 @@ const getUVInfo = value => {
     return {
       value: uv,
       label: 'High',
-      color: '#FFB347',
+      color: '#FB923C',
       message: 'Use sunscreen and sunglasses',
     };
   }
@@ -393,7 +431,7 @@ const getUVInfo = value => {
     return {
       value: uv,
       label: 'Very High',
-      color: '#FF6B6B',
+      color: '#F87171',
       message: 'Avoid direct afternoon sun',
     };
   }
@@ -401,7 +439,7 @@ const getUVInfo = value => {
   return {
     value: uv,
     label: 'Extreme',
-    color: '#FF4D6D',
+    color: '#FB7185',
     message: 'Stay shaded as much as possible',
   };
 };
@@ -448,7 +486,7 @@ const findRainStopSlot = hourlyList => {
 };
 
 const buildRainStopLabel = stopTime => {
-  if (!stopTime) return 'Rain possible later today';
+  if (!stopTime) return 'Chance of rain later';
 
   const now = Date.now();
   const stopMs = Number(stopTime);
@@ -510,7 +548,11 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   );
 
   if (actuallyRainingNow) {
-    const stopSlot = findRainStopSlot(hourlyList);
+    const futureOnly = hourlyList.filter(
+      item => new Date(item.time).getTime() > Date.now() + 5 * 60 * 1000,
+    );
+
+    const stopSlot = findRainStopSlot(futureOnly);
     const stopTime = stopSlot ? new Date(stopSlot.time).getTime() : null;
 
     return {
@@ -527,9 +569,7 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
 
     const itemTime = new Date(item.time).getTime();
 
-    if (itemTime <= now + 5 * 60 * 1000) {
-      return false;
-    }
+    if (itemTime <= now + 5 * 60 * 1000) return false;
 
     return isFutureRainStrong(item);
   });
@@ -568,6 +608,7 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
     stopTime,
     stopTimeLabel: buildRainStopLabel(stopTime),
     chance: Math.round(maxChance),
+    expectedMm: Number(firstRainSlot?.precipMm ?? 0),
   };
 };
 
@@ -589,9 +630,7 @@ const syncRainNotification = async weatherPayload => {
 
     const stateKey = `${rainPrediction.state}-${rainPrediction.stopTime}-${rainPrediction.startTime}`;
 
-    if (lastNotificationState === stateKey) {
-      return;
-    }
+    if (lastNotificationState === stateKey) return;
 
     lastNotificationState = stateKey;
 
@@ -613,10 +652,8 @@ const syncRainNotification = async weatherPayload => {
           'Rain is active now',
         android: {
           channelId,
-          color: '#6CD9FF',
-          pressAction: {
-            id: 'default',
-          },
+          color: '#67E8F9',
+          pressAction: { id: 'default' },
         },
       });
 
@@ -626,9 +663,7 @@ const syncRainNotification = async weatherPayload => {
     if (rainPrediction.state === 'rain_coming' && rainPrediction.startTime) {
       const notifyAt = rainPrediction.startTime - 30 * 60 * 1000;
 
-      if (notifyAt <= Date.now()) {
-        return;
-      }
+      if (notifyAt <= Date.now()) return;
 
       const channelId = await createWeatherNotificationChannel();
 
@@ -645,20 +680,16 @@ const syncRainNotification = async weatherPayload => {
             : `Barsa ${rainPrediction.startTimeLabel} d barpuna saadhyate.`,
           android: {
             channelId,
-            color: '#6CD9FF',
-            pressAction: {
-              id: 'default',
-            },
+            color: '#67E8F9',
+            pressAction: { id: 'default' },
           },
         },
-        {
-          type: TriggerType.TIMESTAMP,
-          timestamp: notifyAt,
-        },
+        { type: TriggerType.TIMESTAMP, timestamp: notifyAt },
       );
     }
   } catch {}
 };
+
 const requestLocationPermission = async () => {
   if (Platform.OS === 'ios') {
     const auth = await Geolocation.requestAuthorization('whenInUse');
@@ -674,9 +705,7 @@ const requestLocationPermission = async () => {
       PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
     );
 
-    if (fineGranted || coarseGranted) {
-      return true;
-    }
+    if (fineGranted || coarseGranted) return true;
 
     const result = await PermissionsAndroid.requestMultiple([
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -696,56 +725,19 @@ const requestLocationPermission = async () => {
 
 const getCurrentLocation = (isRefresh = false) =>
   new Promise((resolve, reject) => {
-    let finished = false;
-
-    const finishSuccess = position => {
-      if (finished) return;
-      finished = true;
-      resolve(position);
-    };
-
-    const finishError = error => {
-      if (finished) return;
-      finished = true;
-      reject(error);
-    };
-
-    const timeoutMs = isRefresh ? 8000 : 12000;
-
-    const hardTimeout = setTimeout(() => {
-      finishError({
-        code: 3,
-        message: 'Location request timed out',
-      });
-    }, timeoutMs);
-
-    Geolocation.getCurrentPosition(
-      position => {
-        clearTimeout(hardTimeout);
-        finishSuccess(position);
-      },
-      error => {
-        clearTimeout(hardTimeout);
-        finishError(error);
-      },
-      {
-        enableHighAccuracy: isRefresh,
-        timeout: isRefresh ? 6000 : 8000,
-        maximumAge: isRefresh ? 0 : 10 * 60 * 1000,
-        forceRequestLocation: true,
-        showLocationDialog: true,
-      },
-    );
+    Geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: isRefresh,
+      timeout: isRefresh ? 6000 : 8000,
+      maximumAge: isRefresh ? 0 : 10 * 60 * 1000,
+      forceRequestLocation: true,
+      showLocationDialog: true,
+    });
   });
 
 const getOpenStreetMapLocationName = async (lat, lon) => {
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
-    {
-      headers: {
-        'User-Agent': 'NammaWeather/1.0',
-      },
-    },
+    { headers: { 'User-Agent': 'NammaWeather/1.0' } },
   );
 
   if (!response.ok) throw new Error(`OSM ${response.status}`);
@@ -965,59 +957,12 @@ const readCoords = async () => {
   }
 };
 
-const WeatherArt = ({ artType, accent }) => {
-  const bounce = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bounce, {
-          toValue: -10,
-          duration: 2400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bounce, {
-          toValue: 0,
-          duration: 2400,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    animation.start();
-
-    return () => animation.stop();
-  }, [bounce]);
-
-  return (
-    <Animated.View
-      style={{ alignItems: 'center', transform: [{ translateY: bounce }] }}
-    >
-      <View
-        style={{
-          position: 'absolute',
-          width: 150,
-          height: 150,
-          borderRadius: 75,
-          backgroundColor: accent + '16',
-          top: 15,
-          alignSelf: 'center',
-        }}
-      />
-
-      <Text style={{ fontSize: 108, lineHeight: 124 }}>
-        {ART_EMOJI[artType] || '☁️'}
-      </Text>
-    </Animated.View>
-  );
-};
-
 const RainTimerCard = ({ prediction, accent }) => {
   if (prediction.state === 'no_rain') return null;
 
   const isNow = prediction.state === 'raining_now';
-  const bg = accent + '14';
-  const border = accent + '38';
+  const bg = 'rgba(15, 23, 42, 0.62)';
+  const border = accent + '44';
 
   if (isNow) {
     return (
@@ -1046,7 +991,7 @@ const RainTimerCard = ({ prediction, accent }) => {
               adjustsFontSizeToFit
               minimumFontScale={0.78}
             >
-              {prediction.stopTimeLabel || 'Rain possible later today'}
+              {prediction.stopTimeLabel || 'Chance of rain later'}
             </Text>
           </View>
         </View>
@@ -1054,12 +999,23 @@ const RainTimerCard = ({ prediction, accent }) => {
     );
   }
 
+  const expectedMm = Number(prediction.expectedMm ?? 0);
+
+  const intensityLabel =
+    expectedMm >= 7.5
+      ? 'heavy rain'
+      : expectedMm >= 3.5
+      ? 'moderate rain'
+      : expectedMm >= 1.5
+      ? 'light rain'
+      : 'drizzle';
+
   return (
     <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
       <View style={st.rainCardRow}>
         <View style={st.rainTimerBlock}>
           <Text style={st.rainTimerIcon}>🕐</Text>
-          <Text style={st.rainTimerLabel}>Rain possible around</Text>
+          <Text style={st.rainTimerLabel}>Chance of rain later</Text>
           <Text style={[st.rainTimerClock, { color: accent }]}>
             {prediction.startTimeLabel}
           </Text>
@@ -1080,14 +1036,14 @@ const RainTimerCard = ({ prediction, accent }) => {
             adjustsFontSizeToFit
             minimumFontScale={0.78}
           >
-            {prediction.stopTimeLabel || 'Rain possible later today'}
+            {prediction.stopTimeLabel || 'Chance of rain later'}
           </Text>
         </View>
       </View>
 
       {prediction.chance > 0 && (
         <Text style={st.rainChanceLabel}>
-          {prediction.chance}% chance, expected rain amount
+          {prediction.chance}% chance of {intensityLabel}
         </Text>
       )}
     </View>
@@ -1109,7 +1065,6 @@ const InfoCard = ({ title, value, label, message, color }) => (
       <Text style={[st.infoLabel, { color }]}>{label}</Text>
       <Text style={st.infoMessage}>{message}</Text>
     </View>
-
     <Text style={[st.infoValue, { color }]}>{value}</Text>
   </View>
 );
@@ -1132,7 +1087,7 @@ export default function Weather() {
   const isMountedRef = useRef(true);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     weatherRef.current = weather;
@@ -1156,18 +1111,22 @@ export default function Weather() {
       })
     : WMO_MAP[3];
 
-  const safeThemeCode =
+  const themeArtCode =
     smartThemeInfo.art === 'rain' || smartThemeInfo.art === 'storm'
       ? currentCode
-      : smartThemeInfo.label === 'MUGAL'
-      ? 3
-      : smartThemeInfo.label === 'ONTHE MUGAL'
-      ? 2
-      : currentCode;
+      : smartThemeInfo.art === 'sunny'
+      ? 0
+      : smartThemeInfo.art === 'partlyCloudy'
+      ? 1
+      : smartThemeInfo.art === 'clearNight'
+      ? 0
+      : smartThemeInfo.art === 'fog'
+      ? 45
+      : 3;
 
   const theme = useMemo(
-    () => getTheme(safeThemeCode, isDay),
-    [safeThemeCode, isDay],
+    () => getTheme(themeArtCode, isDay),
+    [themeArtCode, isDay],
   );
 
   const prediction = useMemo(() => {
@@ -1205,19 +1164,22 @@ export default function Weather() {
     return getUVInfo(currentUv);
   }, [weather]);
 
+  const isRainingNow = prediction.state === 'raining_now';
+  const isHeavyRain = Number(weather?.currentRain ?? 0) >= 6;
+
   const animateIn = () => {
     fadeAnim.setValue(0);
-    slideAnim.setValue(20);
+    slideAnim.setValue(24);
 
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 480,
+        duration: 520,
         useNativeDriver: true,
       }),
       Animated.timing(slideAnim, {
         toValue: 0,
-        duration: 400,
+        duration: 460,
         useNativeDriver: true,
       }),
     ]).start();
@@ -1294,29 +1256,6 @@ export default function Weather() {
         longitude,
       });
 
-      // console.log('===== NAMMA WEATHER DEBUG =====');
-      // console.log('Current Code:', payload.current?.weather_code);
-      // console.log('Cloud Cover:', payload.current?.cloud_cover);
-      // console.log('Current Rain:', payload.currentRain);
-      // console.log('Current Humidity:', payload.current?.relative_humidity_2m);
-      // console.log(
-      //   'Smart Current Info:',
-      //   getSmartWeatherInfo({
-      //     code: payload.current?.weather_code,
-      //     rainAmount: payload.currentRain,
-      //     cloudCover: payload.current?.cloud_cover,
-      //     isDay: payload.current?.is_day,
-      //   }),
-      // );
-      // console.log(
-      //   'Prediction:',
-      //   predictRain(
-      //     payload.hourlyList,
-      //     payload.current?.weather_code,
-      //     payload.currentRain,
-      //   ),
-      // );
-      // console.log('================================');
       setWeather(payload);
       setUsingCached(false);
       setNotice('');
@@ -1363,10 +1302,18 @@ export default function Weather() {
     const cached = await readCache();
 
     if (cached && isMountedRef.current) {
-      setWeather(cached);
-      setUsingCached(true);
-      setLoading(false);
-      animateIn();
+      const cacheAgeMs = Date.now() - (cached.cachedAt || 0);
+      const cacheIsStale = cacheAgeMs > 30 * 60 * 1000;
+      const cacheShowedRain = cached.currentRain >= MIN_REAL_RAIN_MM;
+
+      if (cacheIsStale && cacheShowedRain) {
+        setLoading(true);
+      } else {
+        setWeather(cached);
+        setUsingCached(true);
+        setLoading(false);
+        animateIn();
+      }
     }
 
     loadWeather({ silent: !!cached });
@@ -1393,9 +1340,9 @@ export default function Weather() {
     return () => {
       subscription.remove();
     };
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   const openSettings = () => {
     Linking.openSettings().catch(() => {});
   };
@@ -1454,16 +1401,27 @@ export default function Weather() {
 
   return (
     <View style={[st.screen, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+
+      <SkyBackground
+        weatherArt={currentInfo.art}
+        isDay={weather?.current?.is_day !== 0}
+      />
+
+      <RainSystem
+        isRaining={isRainingNow || ['rain', 'storm'].includes(currentInfo.art)}
+        isHeavyRain={isHeavyRain}
+      />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           st.scrollContent,
-          {
-            paddingTop: insets.top + 18,
-            paddingBottom: insets.bottom + 26,
-          },
+          { paddingTop: insets.top + 22, paddingBottom: insets.bottom + 32 },
         ]}
         refreshControl={
           <RefreshControl
@@ -1476,10 +1434,7 @@ export default function Weather() {
         }
       >
         <Animated.View
-          style={{
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          }}
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
           <View style={st.header}>
             <View style={{ flex: 1 }}>
@@ -1491,13 +1446,13 @@ export default function Weather() {
 
             <TouchableOpacity
               activeOpacity={0.8}
-              style={[st.refreshBtn, { borderColor: theme.accent + '44' }]}
+              style={[st.refreshBtn, { borderColor: theme.accent + '55' }]}
               onPress={() => loadWeather({ isRefresh: true })}
             >
               {refreshing ? (
                 <ActivityIndicator size="small" color={theme.accent} />
               ) : (
-                <Text style={[st.refreshIcon, { color: theme.accent }]}>↻</Text>
+                <Text style={[st.refreshIcon, { color: theme.accent }]}>⟳</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -1509,13 +1464,14 @@ export default function Weather() {
           )}
 
           {usingCached && (
-            <Text style={st.cachedText}>Offline saved weather shown</Text>
+            <Text style={st.cachedText}>Offline • Last updated recently</Text>
           )}
 
           <View style={st.heroCard}>
             <WeatherArt artType={currentInfo.art} accent={theme.accent} />
 
             <Text style={st.tempText}>{temp}°</Text>
+
             <Text style={[st.conditionText, { color: theme.accent }]}>
               {currentInfo.label}
             </Text>
@@ -1572,14 +1528,14 @@ export default function Weather() {
 
             <View style={st.sunRow}>
               <View style={st.sunBox}>
-                <Text style={st.sunIcon}>🌅</Text>
+                <Text style={st.sunIcon}>🌤️</Text>
                 <Text style={st.sunLabel}>Sunrise</Text>
                 <Text style={st.sunValue}>
                   {formatTime(weather?.daily?.sunrise)}
                 </Text>
               </View>
 
-              <View style={st.sunBox}>
+              <View style={st.sunBoxLast}>
                 <Text style={st.sunIcon}>🌇</Text>
                 <Text style={st.sunLabel}>Sunset</Text>
                 <Text style={st.sunValue}>
@@ -1591,7 +1547,7 @@ export default function Weather() {
 
           <View style={st.sectionHeader}>
             <Text style={st.sectionTitle}>Hourly</Text>
-            <Text style={st.sectionSub}>Next weather update</Text>
+            <Text style={st.sectionSub}>Next 12 hours</Text>
           </View>
 
           <ScrollView
@@ -1608,8 +1564,8 @@ export default function Weather() {
                   style={[
                     st.hourCard,
                     {
-                      borderColor: theme.accent + '24',
-                      backgroundColor: theme.accent + '0D',
+                      borderColor: theme.accent + '30',
+                      backgroundColor: 'rgba(30, 41, 59, 0.32)',
                     },
                   ]}
                 >
@@ -1626,7 +1582,7 @@ export default function Weather() {
           </ScrollView>
 
           <View style={st.sectionHeader}>
-            <Text style={st.sectionTitle}>Air Quality</Text>
+            <Text style={st.sectionTitle}>Air Quality & UV</Text>
             <Text style={st.sectionSub}>Health and outdoor safety</Text>
           </View>
 
@@ -1653,6 +1609,7 @@ export default function Weather() {
               sub="Fine dust"
               accent={theme.accent}
             />
+
             <MetricCard
               label="PM10"
               value={formatOptional(weather?.airQuality?.pm10, 1)}
@@ -1661,280 +1618,9 @@ export default function Weather() {
             />
           </View>
 
-          <Text style={st.footer}> BALMY WEATHER, COASTAL SOUL</Text>
+          <Text style={st.footer}>MONSOON • COAST • KARNATAKA</Text>
         </Animated.View>
       </ScrollView>
     </View>
   );
 }
-
-const st = StyleSheet.create({
-  screen: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  scrollContent: { paddingHorizontal: 18 },
-  loadingText: {
-    color: '#E8EDF5',
-    marginTop: 14,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  appTitle: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-  },
-  locationText: {
-    color: '#E8EDF5',
-    fontSize: 21,
-    fontWeight: '900',
-    marginTop: 4,
-  },
-  refreshBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF08',
-  },
-  refreshIcon: { fontSize: 25, fontWeight: '900' },
-  noticeBox: {
-    backgroundColor: '#FFFFFF0D',
-    borderWidth: 1,
-    borderColor: '#FFFFFF12',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
-  },
-  noticeText: { color: '#CAD6E6', fontSize: 12, fontWeight: '700' },
-  cachedText: {
-    color: '#FFD166',
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 10,
-  },
-  heroCard: {
-    borderRadius: 32,
-    padding: 22,
-    backgroundColor: '#FFFFFF08',
-    borderWidth: 1,
-    borderColor: '#FFFFFF12',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  tempText: {
-    color: '#E8EDF5',
-    fontSize: 74,
-    lineHeight: 82,
-    fontWeight: '900',
-    marginTop: -6,
-  },
-  conditionText: { fontSize: 21, fontWeight: '900' },
-  updatedText: {
-    color: '#5A6A82',
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 5,
-    marginBottom: 18,
-  },
-  rainCard: {
-    width: '100%',
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 16,
-    marginTop: 4,
-  },
-  rainCardRow: { flexDirection: 'row', alignItems: 'center' },
-  rainTimerBlock: { flex: 1, alignItems: 'center' },
-  rainTimerDivider: {
-    width: 1,
-    height: 64,
-    backgroundColor: '#FFFFFF18',
-    marginHorizontal: 12,
-  },
-  rainTimerIcon: { fontSize: 25, marginBottom: 5 },
-  rainTimerLabel: {
-    color: '#8A9BB0',
-    fontSize: 11,
-    fontWeight: '900',
-    marginBottom: 4,
-  },
-  rainTimerClock: {
-    color: '#E8EDF5',
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  rainTimerClockSmall: { fontSize: 14, lineHeight: 18 },
-  rainChanceLabel: {
-    color: '#8A9BB0',
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 12,
-  },
-  metricsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  metricCard: {
-    width: '48%',
-    borderRadius: 22,
-    padding: 15,
-    backgroundColor: '#FFFFFF08',
-    borderWidth: 1,
-    borderColor: '#FFFFFF12',
-    marginBottom: 10,
-  },
-  metricLabel: { color: '#8A9BB0', fontSize: 12, fontWeight: '800' },
-  metricValue: { fontSize: 27, fontWeight: '900', marginTop: 6 },
-  metricSub: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  todayCard: {
-    borderRadius: 26,
-    padding: 17,
-    backgroundColor: '#FFFFFF08',
-    borderWidth: 1,
-    borderColor: '#FFFFFF12',
-    marginBottom: 18,
-  },
-  todayRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 14,
-  },
-  todayBadge: { fontSize: 18, fontWeight: '900' },
-  sunRow: { flexDirection: 'row', gap: 10 },
-  sunBox: {
-    flex: 1,
-    borderRadius: 18,
-    padding: 13,
-    backgroundColor: '#0000001E',
-  },
-  sunIcon: { fontSize: 23 },
-  sunLabel: {
-    color: '#8A9BB0',
-    fontSize: 11,
-    fontWeight: '800',
-    marginTop: 6,
-  },
-  sunValue: {
-    color: '#E8EDF5',
-    fontSize: 15,
-    fontWeight: '900',
-    marginTop: 2,
-  },
-  sectionHeader: { marginTop: 4, marginBottom: 12 },
-  sectionTitle: { color: '#E8EDF5', fontSize: 18, fontWeight: '900' },
-  sectionSub: {
-    color: '#5A6A82',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  hourlyList: { gap: 10, paddingRight: 18, paddingBottom: 18 },
-  hourCard: {
-    width: 74,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  hourLabel: { color: '#5A6A82', fontSize: 11, fontWeight: '800' },
-  hourIcon: { fontSize: 25, marginTop: 8 },
-  hourTemp: {
-    color: '#E8EDF5',
-    fontSize: 16,
-    fontWeight: '900',
-    marginTop: 5,
-  },
-  hourRain: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 3,
-  },
-  hourMm: {
-    color: '#6CD9FF',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  infoCard: {
-    borderRadius: 22,
-    padding: 16,
-    backgroundColor: '#FFFFFF08',
-    borderWidth: 1,
-    borderColor: '#FFFFFF12',
-    marginBottom: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  infoTitle: { color: '#8A9BB0', fontSize: 12, fontWeight: '800' },
-  infoLabel: { fontSize: 20, fontWeight: '900', marginTop: 3 },
-  infoMessage: {
-    color: '#5A6A82',
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  infoValue: { fontSize: 32, fontWeight: '900', alignSelf: 'center' },
-  footer: {
-    textAlign: 'center',
-    color: '#5A6A82',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    opacity: 0.25,
-    marginTop: 8,
-  },
-  errorIcon: { fontSize: 44, marginBottom: 14 },
-  errorTitle: {
-    color: '#E8EDF5',
-    fontSize: 22,
-    fontWeight: '900',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  errorText: {
-    color: '#8A9BB0',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 18,
-  },
-  primaryBtn: {
-    paddingHorizontal: 22,
-    paddingVertical: 13,
-    borderRadius: 18,
-    marginBottom: 10,
-  },
-  primaryBtnText: { color: '#08111F', fontSize: 14, fontWeight: '900' },
-  secondaryBtn: {
-    paddingHorizontal: 22,
-    paddingVertical: 13,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF10',
-    borderWidth: 1,
-    borderColor: '#FFFFFF14',
-  },
-  secondaryBtnText: { color: '#E8EDF5', fontSize: 14, fontWeight: '900' },
-});
