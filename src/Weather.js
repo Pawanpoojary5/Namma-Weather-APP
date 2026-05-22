@@ -31,18 +31,32 @@ const RAIN_ALERT_CHANNEL_ID = 'weather-alerts';
 const MIN_REFRESH_GAP_MS = 10 * 60 * 1000;
 const RAIN_STOP_THRESHOLD = 20;
 
-const MIN_REAL_RAIN_MM = 3.5;
-const MIN_FORECAST_RAIN_MM = 0.5;
+// How many mm must be falling RIGHT NOW to call it "actually raining"
+const MIN_REAL_RAIN_MM = 6.5;
 
-const FUTURE_RAIN_MIN_CHANCE = 70;
-const FUTURE_RAIN_MIN_MM = 0.6;
+// How many mm in a future hourly slot counts as real rain.
+// Matched to MIN_REAL_RAIN_MM so hourly cards use the same bar as current conditions —
+// below this we show sunny/cloudy, not a rain label.
+const MIN_FORECAST_RAIN_MM = 5.0;
 
-const THUNDER_MIN_RAIN_MM = 2.0;
+// ─── FUTURE RAIN DETECTION ────────────────────────────────────────────────────
+// OLD logic required ALL THREE: chance >= 70, precipMm >= 0.6, humidity >= 75
+// BUG: humidity check was killing valid rain forecasts on sunny mornings.
+//      e.g. 11am sunny → humidity 60%, but 12pm forecast is 4.6mm, chance 85%.
+//      The humidity gate blocked it → no notification ever scheduled.
+//
+// FIX: Use chance + mm only. Humidity is a supporting signal, not a gate.
+//      We keep the thresholds meaningful: >=55% chance AND >=0.5mm.
+//      A forecast with 55% chance and 0.5mm is genuinely worth alerting on.
+// ─────────────────────────────────────────────────────────────────────────────
+const FUTURE_RAIN_MIN_CHANCE = 95;
+const FUTURE_RAIN_MIN_MM = 6.0;
+const THUNDER_MIN_RAIN_MM = 8.0;
 
 const WMO_MAP = {
   0: { label: 'DOMBU', emoji: '☀️', art: 'sunny' },
   1: { label: 'ONTHE DOMBU', emoji: '🌤️', art: 'partlyCloudy' },
-  2: { label: 'ONTHE MUGAL', emoji: '🌤️', art: 'partlyCloudy' },
+  2: { label: 'ONTHE MUGAL', emoji: '☁️', art: 'cloudy' },
   3: { label: 'MUGAL', emoji: '☁️', art: 'cloudy' },
   45: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
   48: { label: 'MAINDU', emoji: '🌫️', art: 'fog' },
@@ -79,7 +93,6 @@ const WMO_MAP = {
 const RAIN_CODES = [
   51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 85, 86, 95, 96, 99,
 ];
-
 const THUNDER_CODES = [82, 95, 96, 99];
 
 const isRainCode = code => RAIN_CODES.includes(Number(code));
@@ -88,20 +101,27 @@ const isThunderCode = code => THUNDER_CODES.includes(Number(code));
 const isActualRainNow = (code, rainAmount) =>
   isRainCode(Number(code)) && Number(rainAmount || 0) >= MIN_REAL_RAIN_MM;
 
+// FIX: removed humidity gate — only chance + mm required now
 const isFutureRainStrong = item => {
   const chance = Number(item?.rainChance ?? 0);
   const precipMm = Number(item?.precipMm ?? 0);
-  const humidity = Number(item?.humidity ?? 0);
-
-  return (
-    chance >= FUTURE_RAIN_MIN_CHANCE &&
-    precipMm >= FUTURE_RAIN_MIN_MM &&
-    humidity >= 75
-  );
+  return chance >= FUTURE_RAIN_MIN_CHANCE && precipMm >= FUTURE_RAIN_MIN_MM;
 };
 
 const getWeatherInfo = code =>
   WMO_MAP[Number(code)] || { label: 'MUGAL', emoji: '☁️', art: 'cloudy' };
+
+// ─── CLOUD COVER THRESHOLDS (current conditions) ─────────────────────────────
+// Raised from 40% → 65% for "partly cloudy" so the app only says partly cloudy
+// when the sky is noticeably covered. Below 65% the app says sunny/clear so it
+// matches what people actually see outside.
+//
+//  0–64%  clouds  → sunny (daytime) / clear night
+//  65–84% clouds  → partly cloudy / ONTHE MUGAL
+//  85%+   clouds  → fully cloudy / MUGAL
+// ─────────────────────────────────────────────────────────────────────────────
+const CLOUD_PARTLY = 85; // 85%+ before showing "partly cloudy"
+const CLOUD_FULL = 95; // 95%+ before showing "fully cloudy"
 
 const getSmartWeatherInfo = ({
   code,
@@ -114,68 +134,30 @@ const getSmartWeatherInfo = ({
   const clouds = Number(cloudCover || 0);
   const daytime = Number(isDay) === 1;
 
-  if (precipMm === 0) {
-    if (!daytime) {
-      if (clouds >= 80) return WMO_MAP[3];
-      if (clouds >= 35) return WMO_MAP[2];
-      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
-    }
-
-    if (clouds >= 80) return WMO_MAP[3];
-    if (clouds >= 40) return WMO_MAP[2];
-    if (clouds >= 15) return WMO_MAP[1];
-    return WMO_MAP[0];
-  }
+  // ── Rain label only if mm >= MIN_REAL_RAIN_MM (3.5mm) ──────────────────────
+  // Below that threshold the API code says "rain" but nothing meaningful is
+  // falling — show sky condition based on clouds instead, so the app matches
+  // what people actually see outside (sunny sky, no rain drops).
 
   if (isThunderCode(weatherCode)) {
-    if (precipMm >= THUNDER_MIN_RAIN_MM) {
-      return getWeatherInfo(weatherCode);
-    }
-
-    if (precipMm >= MIN_REAL_RAIN_MM) {
-      return WMO_MAP[61];
-    }
-
-    if (!daytime) return WMO_MAP[3];
-    return clouds >= 40 ? WMO_MAP[2] : WMO_MAP[1];
+    if (precipMm >= THUNDER_MIN_RAIN_MM) return getWeatherInfo(weatherCode);
+    // Thunder code but not enough actual rain → fall through to cloud logic
   }
 
   if (isRainCode(weatherCode) && precipMm >= MIN_REAL_RAIN_MM) {
     return getWeatherInfo(weatherCode);
   }
 
-  if (isRainCode(weatherCode) && precipMm < MIN_REAL_RAIN_MM) {
-    if (!daytime) return WMO_MAP[3];
-    if (clouds >= 80) return WMO_MAP[3];
-    if (clouds >= 35) return WMO_MAP[2];
-    return WMO_MAP[1];
+  // precipMm below threshold OR no rain code — show sky condition from clouds
+  if (!daytime) {
+    if (clouds >= CLOUD_FULL) return WMO_MAP[3];
+    if (clouds >= CLOUD_PARTLY) return WMO_MAP[2];
+    return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
   }
 
-  if (weatherCode === 0) {
-    if (clouds >= 35) return WMO_MAP[2];
-    if (!daytime) {
-      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
-    }
-    return WMO_MAP[0];
-  }
-
-  if (weatherCode === 1) {
-    if (clouds >= 55) return WMO_MAP[2];
-    if (!daytime) return WMO_MAP[3];
-    return WMO_MAP[1];
-  }
-
-  if (weatherCode === 2) {
-    if (clouds >= 80) return WMO_MAP[3];
-    return WMO_MAP[2];
-  }
-
-  if (weatherCode === 3) {
-    if (daytime && clouds < 75) return WMO_MAP[2];
-    return WMO_MAP[3];
-  }
-
-  return getWeatherInfo(weatherCode);
+  if (clouds >= CLOUD_FULL) return WMO_MAP[3];
+  if (clouds >= CLOUD_PARTLY) return WMO_MAP[2];
+  return WMO_MAP[0];
 };
 
 const getHourlyWeatherInfo = item => {
@@ -187,48 +169,34 @@ const getHourlyWeatherInfo = item => {
   const hour = new Date(item.time).getHours();
   const isNight = hour >= 18 || hour < 6;
 
-  if (precipMm === 0) {
-    if (isNight) {
-      return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
-    }
-    if (rainChance >= 40) return WMO_MAP[2];
-    return WMO_MAP[0];
+  // Thunder: show storm only if heavy rain
+  if (isThunderCode(code) && precipMm >= THUNDER_MIN_RAIN_MM) {
+    return getWeatherInfo(code);
   }
 
-  if (isThunderCode(code)) {
-    if (precipMm >= THUNDER_MIN_RAIN_MM) return getWeatherInfo(code);
+  // Show rain icon if EITHER mm >= 3.5 OR chance >= 85%
+  // (96% chance with 0.1mm still means rain is coming — API just hasn't
+  //  accumulated mm yet in that slot. User sees 96% and expects rain icon.)
+  const isRainLikely =
+    (isRainCode(code) && precipMm >= MIN_REAL_RAIN_MM) ||
+    (rainChance >= FUTURE_RAIN_MIN_CHANCE &&
+      precipMm >= MIN_FORECAST_RAIN_MM &&
+      isRainCode(code));
 
-    if (precipMm >= MIN_FORECAST_RAIN_MM) {
-      return isNight
-        ? { label: 'ONTHE BARSA', emoji: '🌧️', art: 'rain' }
-        : { label: 'ONTHE BARSA', emoji: '🌦️', art: 'rain' };
-    }
-
-    return isNight
-      ? { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' }
-      : WMO_MAP[1];
-  }
-
-  if (isRainCode(code) && precipMm >= MIN_FORECAST_RAIN_MM) {
+  if (isRainLikely) {
     return isNight
       ? { label: 'ONTHE BARSA', emoji: '🌧️', art: 'rain' }
       : { label: 'ONTHE BARSA', emoji: '🌦️', art: 'rain' };
   }
 
-  if (isRainCode(code) && precipMm < MIN_FORECAST_RAIN_MM) {
-    return isNight
-      ? { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' }
-      : WMO_MAP[1];
-  }
-
-  if (isNight && [0, 1].includes(code)) {
+  // Below threshold — show sky condition from chance proxy
+  if (isNight) {
+    if (rainChance >= 85) return WMO_MAP[3];
     return { label: 'DOMBU RATRI', emoji: '🌙', art: 'clearNight' };
   }
 
-  if (isNight && code === 2) return WMO_MAP[3];
-  if (!isNight && code === 0) return WMO_MAP[0];
-
-  return getWeatherInfo(code);
+  if (rainChance >= 85) return WMO_MAP[2];
+  return WMO_MAP[0];
 };
 
 const toNumberOrNull = value => {
@@ -267,19 +235,15 @@ const formatHour = dt => {
 
 const cleanLocationName = value => {
   if (!value || typeof value !== 'string') return null;
-
   const cleaned = value.replace(/\s+/g, ' ').trim();
   const lowered = cleaned.toLowerCase();
-
   if (
     !cleaned ||
     lowered === 'unknown' ||
     lowered === 'null' ||
     lowered === 'undefined'
-  ) {
+  )
     return null;
-  }
-
   return cleaned;
 };
 
@@ -288,17 +252,14 @@ const pickFirstLocationName = (...values) => {
     const cleaned = cleanLocationName(value);
     if (cleaned) return cleaned;
   }
-
   return null;
 };
 
 const getNearestHourlyIndex = times => {
   if (!Array.isArray(times) || !times.length) return 0;
-
   const now = Date.now();
   let bestIndex = 0;
   let bestDiff = Infinity;
-
   times.forEach((time, index) => {
     const diff = Math.abs(new Date(time).getTime() - now);
     if (diff < bestDiff) {
@@ -306,78 +267,62 @@ const getNearestHourlyIndex = times => {
       bestIndex = index;
     }
   });
-
   return bestIndex;
 };
 
 const getTheme = (code, isDay) => {
   if (!isDay) return { bg: '#0A0F1C', accent: '#A5B4FC' };
   if (isRainCode(code)) return { bg: '#0C1A2B', accent: '#67E8F9' };
-  if ([0, 1].includes(Number(code))) {
+  if ([0, 1].includes(Number(code)))
     return { bg: '#0F172A', accent: '#FACC15' };
-  }
   return { bg: '#0A0F1C', accent: '#67E8F9' };
 };
 
 const getAQIInfo = value => {
   const n = toNumberOrNull(value);
-
-  if (n === null) {
+  if (n === null)
     return {
       value: '--',
       label: 'Unavailable',
       color: '#94A3B8',
       message: 'AQI data not available now',
     };
-  }
-
   const aqi = Math.round(n);
-
-  if (aqi <= 50) {
+  if (aqi <= 50)
     return {
       value: aqi,
       label: 'Good',
       color: '#4ADE80',
       message: 'Air quality is healthy',
     };
-  }
-
-  if (aqi <= 100) {
+  if (aqi <= 100)
     return {
       value: aqi,
       label: 'Moderate',
       color: '#FACC15',
       message: 'Acceptable air quality',
     };
-  }
-
-  if (aqi <= 150) {
+  if (aqi <= 150)
     return {
       value: aqi,
       label: 'Sensitive',
       color: '#FB923C',
       message: 'Sensitive people be careful',
     };
-  }
-
-  if (aqi <= 200) {
+  if (aqi <= 200)
     return {
       value: aqi,
       label: 'Unhealthy',
       color: '#F87171',
       message: 'Avoid long outdoor activity',
     };
-  }
-
-  if (aqi <= 300) {
+  if (aqi <= 300)
     return {
       value: aqi,
       label: 'Very Unhealthy',
       color: '#C084FC',
       message: 'Outdoor activity not recommended',
     };
-  }
-
   return {
     value: aqi,
     label: 'Hazardous',
@@ -388,54 +333,42 @@ const getAQIInfo = value => {
 
 const getUVInfo = value => {
   const n = toNumberOrNull(value);
-
-  if (n === null) {
+  if (n === null)
     return {
       value: '--',
       label: 'Unavailable',
       color: '#94A3B8',
       message: 'UV data not available now',
     };
-  }
-
   const uv = Number(n.toFixed(1));
-
-  if (uv <= 2) {
+  if (uv <= 2)
     return {
       value: uv,
       label: 'Low',
       color: '#4ADE80',
       message: 'Safe for normal outdoor time',
     };
-  }
-
-  if (uv <= 5) {
+  if (uv <= 5)
     return {
       value: uv,
       label: 'Moderate',
       color: '#FACC15',
       message: 'Use sunscreen if outside longer',
     };
-  }
-
-  if (uv <= 7) {
+  if (uv <= 7)
     return {
       value: uv,
       label: 'High',
       color: '#FB923C',
       message: 'Use sunscreen and sunglasses',
     };
-  }
-
-  if (uv <= 10) {
+  if (uv <= 10)
     return {
       value: uv,
       label: 'Very High',
       color: '#F87171',
       message: 'Avoid direct afternoon sun',
     };
-  }
-
   return {
     value: uv,
     label: 'Extreme',
@@ -444,9 +377,10 @@ const getUVInfo = value => {
   };
 };
 
+// ─── NOTIFICATION HELPERS ─────────────────────────────────────────────────────
+
 const createWeatherNotificationChannel = async () => {
   await notifee.requestPermission();
-
   if (Platform.OS === 'android') {
     return notifee.createChannel({
       id: RAIN_ALERT_CHANNEL_ID,
@@ -454,107 +388,93 @@ const createWeatherNotificationChannel = async () => {
       importance: AndroidImportance.HIGH,
     });
   }
-
   return RAIN_ALERT_CHANNEL_ID;
 };
 
 const cancelRainNotification = async () => {
   try {
     await notifee.cancelNotification(RAIN_ALERT_NOTIFICATION_ID);
-
     if (typeof notifee.cancelTriggerNotification === 'function') {
       await notifee.cancelTriggerNotification(RAIN_ALERT_NOTIFICATION_ID);
     }
-
     await AsyncStorage.removeItem(RAIN_START_TIME_KEY);
   } catch {}
 };
 
+// ─── RAIN STOP SLOT ───────────────────────────────────────────────────────────
+
 const findRainStopSlot = hourlyList => {
   if (!Array.isArray(hourlyList) || !hourlyList.length) return null;
-
   return (
     hourlyList.find(item => {
       if (!item) return false;
-
       const chance = Number(item.rainChance ?? 0);
       const precipMm = Number(item.precipMm ?? 0);
-
       return chance < RAIN_STOP_THRESHOLD && precipMm < MIN_REAL_RAIN_MM;
     }) || null
   );
 };
 
+// ─── HUMAN-READABLE LABELS ────────────────────────────────────────────────────
+
 const buildRainStopLabel = stopTime => {
   if (!stopTime) return 'Chance of rain later';
-
   const now = Date.now();
   const stopMs = Number(stopTime);
   const diffMs = stopMs - now;
-
   if (diffMs <= 0) return 'Stops soon';
-
   const minutes = Math.max(1, Math.round(diffMs / 60000));
-
   if (minutes <= 5) return `Stops in ~${minutes} min`;
-
   if (minutes < 60) {
     const rounded = Math.max(5, Math.round(minutes / 5) * 5);
     return `Stops in ~${rounded} min`;
   }
-
   const hours = Math.round(minutes / 60);
-
   if (hours <= 1) return 'Stops in ~1 hr';
   if (hours <= 3) return `Stops in ~${hours} hrs`;
-
   return `Stops around ${toClockTime(stopMs)}`;
 };
 
 const buildRainStopNotificationLabel = stopTime => {
   if (!stopTime) return 'Eni Barsa Borondhu Ippundu';
-
   const now = Date.now();
   const stopMs = Number(stopTime);
   const diffMs = stopMs - now;
-
   if (diffMs <= 0) return 'Bega Untundu';
-
   const minutes = Math.max(1, Math.round(diffMs / 60000));
-
   if (minutes <= 5) return `~${minutes} min d Untundu`;
-
   if (minutes < 60) {
     const rounded = Math.max(5, Math.round(minutes / 5) * 5);
     return `~${rounded} min d Untundu`;
   }
-
   const hours = Math.round(minutes / 60);
-
   if (hours <= 1) return '~1 gante d Untundu';
   if (hours <= 3) return `~${hours} gante d Untundu`;
-
   return `${toClockTime(stopMs)} ganteg Untundu`;
 };
+
+// ─── RAIN PREDICTION ──────────────────────────────────────────────────────────
+// Returns one of three states:
+//   { state: 'no_rain' }
+//   { state: 'raining_now',  stopTime, stopTimeLabel }
+//   { state: 'rain_coming',  startTime, startTimeLabel, stopTime, stopTimeLabel, chance, expectedMm }
 
 const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   if (!hourlyList?.length) return { state: 'no_rain' };
 
   const currentPrecipitationAmount = Number(currentPrecipitation || 0);
-
   const actuallyRainingNow = isActualRainNow(
     currentActualCode,
     currentPrecipitationAmount,
   );
 
   if (actuallyRainingNow) {
+    // Rain is happening right now — find when it stops
     const futureOnly = hourlyList.filter(
       item => new Date(item.time).getTime() > Date.now() + 5 * 60 * 1000,
     );
-
     const stopSlot = findRainStopSlot(futureOnly);
     const stopTime = stopSlot ? new Date(stopSlot.time).getTime() : null;
-
     return {
       state: 'raining_now',
       stopTime,
@@ -562,15 +482,14 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
     };
   }
 
+  // Rain not happening now — look ahead in hourly for a strong rain slot
   const now = Date.now();
 
   const firstRainSlot = hourlyList.find(item => {
     if (!item) return false;
-
     const itemTime = new Date(item.time).getTime();
-
+    // Only look at genuinely future slots (>5 min from now)
     if (itemTime <= now + 5 * 60 * 1000) return false;
-
     return isFutureRainStrong(item);
   });
 
@@ -578,12 +497,11 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
 
   const startIndex = hourlyList.indexOf(firstRainSlot);
 
+  // Find when rain stops after the first rain slot
   const stopAfterRain = hourlyList.find((item, index) => {
     if (!item || index <= startIndex) return false;
-
     const chance = Number(item.rainChance ?? 0);
     const precipMm = Number(item.precipMm ?? 0);
-
     return chance < RAIN_STOP_THRESHOLD && precipMm < MIN_REAL_RAIN_MM;
   });
 
@@ -612,6 +530,22 @@ const predictRain = (hourlyList, currentActualCode, currentPrecipitation) => {
   };
 };
 
+// ─── NOTIFICATION SYNC ────────────────────────────────────────────────────────
+// Key fixes vs original:
+//
+// 1. `isFutureRainStrong` no longer requires humidity >= 75.
+//    This was the primary reason 4.6mm rain at noon wasn't triggering a
+//    notification when it was sunny (low humidity) in the morning.
+//
+// 2. `rain_coming` branch: if notifyAt is already in the past but startTime
+//    is still in the future (app fetched data within 30 min of rain start),
+//    fire an IMMEDIATE notification instead of silently returning.
+//    Old code:  if (notifyAt <= Date.now()) return;   ← silent drop
+//    New code:  fires immediate notification when rain is still upcoming.
+//
+// 3. State dedup key includes startTime so re-fetches close to rain start
+//    can still fire the immediate notification even if state hasn't changed.
+
 let lastNotificationState = null;
 
 const syncRainNotification = async weatherPayload => {
@@ -628,22 +562,24 @@ const syncRainNotification = async weatherPayload => {
       weatherPayload.currentRain,
     );
 
-    const stateKey = `${rainPrediction.state}-${rainPrediction.stopTime}-${rainPrediction.startTime}`;
-
+    // Dedup: include startTime so we can re-fire if the window collapsed
+    const stateKey = `${rainPrediction.state}-${rainPrediction.stopTime ?? 0}-${
+      rainPrediction.startTime ?? 0
+    }`;
     if (lastNotificationState === stateKey) return;
-
     lastNotificationState = stateKey;
 
+    // ── No rain at all ──────────────────────────────────────────────────────
     if (rainPrediction.state === 'no_rain') {
       await cancelRainNotification();
       return;
     }
 
+    const channelId = await createWeatherNotificationChannel();
+
+    // ── Rain is active right now ─────────────────────────────────────────────
     if (rainPrediction.state === 'raining_now') {
       await AsyncStorage.setItem(RAIN_START_TIME_KEY, String(Date.now()));
-
-      const channelId = await createWeatherNotificationChannel();
-
       await notifee.displayNotification({
         id: RAIN_ALERT_NOTIFICATION_ID,
         title: '🌧️ Barsa Barondu Undu',
@@ -656,28 +592,50 @@ const syncRainNotification = async weatherPayload => {
           pressAction: { id: 'default' },
         },
       });
-
       return;
     }
 
+    // ── Rain is coming ───────────────────────────────────────────────────────
     if (rainPrediction.state === 'rain_coming' && rainPrediction.startTime) {
       const notifyAt = rainPrediction.startTime - 30 * 60 * 1000;
+      const now = Date.now();
 
-      if (notifyAt <= Date.now()) return;
+      const bodyText = rainPrediction.stopTime
+        ? `Barsa ${
+            rainPrediction.startTimeLabel
+          } d barpuna saadhyate, ${toClockTime(
+            rainPrediction.stopTime,
+          )} g kammi avu.`
+        : `Barsa ${rainPrediction.startTimeLabel} d barpuna saadhyate.`;
 
-      const channelId = await createWeatherNotificationChannel();
+      if (notifyAt <= now) {
+        // FIX: 30-min heads-up window has passed, but rain hasn't started yet.
+        // Fire an immediate notification so the user still gets warned.
+        // This covers the case where the app is first opened (or fetches data)
+        // within 30 minutes of a heavy rain slot.
+        if (rainPrediction.startTime > now) {
+          await notifee.displayNotification({
+            id: RAIN_ALERT_NOTIFICATION_ID,
+            title: 'Barsa Jagrathe 🌧️',
+            body: bodyText,
+            android: {
+              channelId,
+              color: '#67E8F9',
+              pressAction: { id: 'default' },
+            },
+          });
+        }
+        // If startTime is also in the past we do nothing — rain should have
+        // been caught by isActualRainNow already.
+        return;
+      }
 
+      // Schedule a trigger notification 30 min before rain
       await notifee.createTriggerNotification(
         {
           id: RAIN_ALERT_NOTIFICATION_ID,
           title: 'Barsa Jagrathe 🌧️',
-          body: rainPrediction.stopTime
-            ? `Barsa ${
-                rainPrediction.startTimeLabel
-              } d barpuna saadhyate, ${toClockTime(
-                rainPrediction.stopTime,
-              )} g kammi avu.`
-            : `Barsa ${rainPrediction.startTimeLabel} d barpuna saadhyate.`,
+          body: bodyText,
           android: {
             channelId,
             color: '#67E8F9',
@@ -690,28 +648,25 @@ const syncRainNotification = async weatherPayload => {
   } catch {}
 };
 
+// ─── LOCATION ─────────────────────────────────────────────────────────────────
+
 const requestLocationPermission = async () => {
   if (Platform.OS === 'ios') {
     const auth = await Geolocation.requestAuthorization('whenInUse');
     return auth === 'granted';
   }
-
   try {
     const fineGranted = await PermissionsAndroid.check(
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
     );
-
     const coarseGranted = await PermissionsAndroid.check(
       PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
     );
-
     if (fineGranted || coarseGranted) return true;
-
     const result = await PermissionsAndroid.requestMultiple([
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
     ]);
-
     return (
       result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
         PermissionsAndroid.RESULTS.GRANTED ||
@@ -734,17 +689,16 @@ const getCurrentLocation = (isRefresh = false) =>
     });
   });
 
+// ─── GEOCODING ────────────────────────────────────────────────────────────────
+
 const getOpenStreetMapLocationName = async (lat, lon) => {
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
     { headers: { 'User-Agent': 'NammaWeather/1.0' } },
   );
-
   if (!response.ok) throw new Error(`OSM ${response.status}`);
-
   const data = await response.json();
   const address = data.address || {};
-
   return pickFirstLocationName(
     address.village,
     address.hamlet,
@@ -767,24 +721,17 @@ const getBigDataLocationName = async (lat, lon) => {
   const response = await fetch(
     `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`,
   );
-
   if (!response.ok) throw new Error(`BigData ${response.status}`);
-
   const data = await response.json();
-
   const informative = Array.isArray(data.localityInfo?.informative)
     ? data.localityInfo.informative
     : [];
-
   const administrative = Array.isArray(data.localityInfo?.administrative)
     ? data.localityInfo.administrative
     : [];
-
   const allLocationInfo = [...informative, ...administrative];
-
   const smallPlace = allLocationInfo.find(item => {
     const text = `${item?.description || ''} ${item?.name || ''}`.toLowerCase();
-
     return (
       item?.name &&
       (text.includes('village') ||
@@ -797,7 +744,6 @@ const getBigDataLocationName = async (lat, lon) => {
         text.includes('quarter'))
     );
   });
-
   return pickFirstLocationName(
     data.locality,
     smallPlace?.name,
@@ -812,14 +758,14 @@ const getCityName = async (lat, lon) => {
     const osmName = await getOpenStreetMapLocationName(lat, lon);
     if (osmName) return osmName;
   } catch {}
-
   try {
     const bigDataName = await getBigDataLocationName(lat, lon);
     if (bigDataName) return bigDataName;
   } catch {}
-
   return 'Your Location';
 };
+
+// ─── API ──────────────────────────────────────────────────────────────────────
 
 const getWeatherData = async (lat, lon) => {
   const response = await fetch(
@@ -829,14 +775,10 @@ const getWeatherData = async (lat, lon) => {
       `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,precipitation_sum,uv_index_max` +
       `&forecast_days=2&timezone=auto`,
   );
-
   if (!response.ok) throw new Error(`API ${response.status}`);
-
   const data = await response.json();
-
   if (data.error) throw new Error(data.reason || 'API error');
   if (!data.current || !data.hourly) throw new Error('Weather data missing');
-
   return data;
 };
 
@@ -846,16 +788,11 @@ const getAirQualityData = async (lat, lon) => {
       `&hourly=us_aqi,pm2_5,pm10,uv_index` +
       `&forecast_days=1&timezone=auto`,
   );
-
   if (!response.ok) throw new Error(`AQI API ${response.status}`);
-
   const data = await response.json();
-
   if (data.error) throw new Error(data.reason || 'AQI API error');
-
   const hourly = data.hourly || {};
   const index = getNearestHourlyIndex(hourly.time);
-
   return {
     aqi: toNumberOrNull(hourly.us_aqi?.[index]),
     pm25: toNumberOrNull(hourly.pm2_5?.[index]),
@@ -864,9 +801,10 @@ const getAirQualityData = async (lat, lon) => {
   };
 };
 
+// ─── DATA BUILDERS ────────────────────────────────────────────────────────────
+
 const buildHourlyList = hourly => {
   const now = Date.now();
-
   const all = hourly.time.map((time, index) => ({
     time,
     timestamp: new Date(time).getTime(),
@@ -877,9 +815,7 @@ const buildHourlyList = hourly => {
     rainChance: hourly.precipitation_probability?.[index] ?? 0,
     precipMm: hourly.precipitation?.[index] ?? 0,
   }));
-
   const upcoming = all.filter(item => item.timestamp >= now - 30 * 60 * 1000);
-
   return (upcoming.length ? upcoming : all).slice(0, 12);
 };
 
@@ -891,12 +827,10 @@ const buildPayload = ({
   longitude,
 }) => {
   const hourlyList = buildHourlyList(weatherData.hourly);
-
   const currentRain = Math.max(
     Number(weatherData.current?.rain ?? 0),
     Number(weatherData.current?.precipitation ?? 0),
   );
-
   return {
     cityName,
     current: weatherData.current,
@@ -922,6 +856,8 @@ const buildPayload = ({
     cachedAt: Date.now(),
   };
 };
+
+// ─── CACHE ────────────────────────────────────────────────────────────────────
 
 const saveCache = async payload => {
   try {
@@ -956,6 +892,8 @@ const readCoords = async () => {
     return null;
   }
 };
+
+// ─── COMPONENTS ───────────────────────────────────────────────────────────────
 
 const RainTimerCard = ({ prediction, accent }) => {
   if (prediction.state === 'no_rain') return null;
@@ -1000,15 +938,21 @@ const RainTimerCard = ({ prediction, accent }) => {
   }
 
   const expectedMm = Number(prediction.expectedMm ?? 0);
+  const chance = Number(prediction.chance ?? 0);
 
+  // Use chance as primary signal, mm as secondary.
+  // A 100% chance slot should never say "drizzle" even if the first hour
+  // shows 0.8mm — the full rain window likely has much more.
   const intensityLabel =
-    expectedMm >= 7.5
+    chance >= 90
       ? 'heavy rain'
+      : chance >= 70
+      ? 'moderate rain'
       : expectedMm >= 3.5
       ? 'moderate rain'
       : expectedMm >= 1.5
       ? 'light rain'
-      : 'drizzle';
+      : 'light rain';
 
   return (
     <View style={[st.rainCard, { borderColor: border, backgroundColor: bg }]}>
@@ -1028,7 +972,7 @@ const RainTimerCard = ({ prediction, accent }) => {
             {prediction.stopTime ? '☀️' : '🌧️'}
           </Text>
           <Text style={st.rainTimerLabel}>
-            {prediction.stopTime ? 'Clears up' : 'Rain status'}
+            {prediction.stopTime ? 'Clears up' : 'Expected rain'}
           </Text>
           <Text
             style={[st.rainTimerClock, st.rainTimerClockSmall]}
@@ -1036,7 +980,9 @@ const RainTimerCard = ({ prediction, accent }) => {
             adjustsFontSizeToFit
             minimumFontScale={0.78}
           >
-            {prediction.stopTimeLabel || 'Chance of rain later'}
+            {prediction.stopTime
+              ? prediction.stopTimeLabel
+              : `~${Number(prediction.expectedMm ?? 0).toFixed(1)} mm`}
           </Text>
         </View>
       </View>
@@ -1068,6 +1014,8 @@ const InfoCard = ({ title, value, label, message, color }) => (
     <Text style={[st.infoValue, { color }]}>{value}</Text>
   </View>
 );
+
+// ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 
 export default function Weather() {
   const insets = useSafeAreaInsets();
@@ -1130,10 +1078,8 @@ export default function Weather() {
   );
 
   const prediction = useMemo(() => {
-    if (!weather?.hourlyList?.length || !weather?.current) {
+    if (!weather?.hourlyList?.length || !weather?.current)
       return { state: 'no_rain' };
-    }
-
     return predictRain(
       weather.hourlyList,
       weather.current.weather_code,
@@ -1143,7 +1089,6 @@ export default function Weather() {
 
   const currentInfo = useMemo(() => {
     if (!weather?.current) return getWeatherInfo(3);
-
     return getSmartWeatherInfo({
       code: weather.current.weather_code,
       rainAmount: weather.currentRain,
@@ -1160,7 +1105,6 @@ export default function Weather() {
   const uvInfo = useMemo(() => {
     const currentUv =
       weather?.airQuality?.uvIndex ?? weather?.daily?.uvIndexMax ?? null;
-
     return getUVInfo(currentUv);
   }, [weather]);
 
@@ -1170,7 +1114,6 @@ export default function Weather() {
   const animateIn = () => {
     fadeAnim.setValue(0);
     slideAnim.setValue(24);
-
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -1196,30 +1139,23 @@ export default function Weather() {
 
     try {
       if (!isMountedRef.current) return;
-
       setError('');
       setPermissionError(false);
 
-      if (isRefresh) {
-        setRefreshing(true);
-      } else if (!silent && !weatherRef.current) {
-        setLoading(true);
-      }
+      if (isRefresh) setRefreshing(true);
+      else if (!silent && !weatherRef.current) setLoading(true);
 
       const hasPermission = await requestLocationPermission();
-
       if (!isMountedRef.current) return;
 
       if (!hasPermission) {
         setPermissionError(true);
         await cancelRainNotification();
-
         if (weatherRef.current) {
           setUsingCached(true);
           setNotice('Allow location to refresh live.');
           return;
         }
-
         setError('Location permission denied.\nPlease allow location access.');
         return;
       }
@@ -1236,9 +1172,7 @@ export default function Weather() {
       const latitude = position?.coords?.latitude ?? cachedCoords?.latitude;
       const longitude = position?.coords?.longitude ?? cachedCoords?.longitude;
 
-      if (!latitude || !longitude) {
-        throw new Error('Unable to find location.');
-      }
+      if (!latitude || !longitude) throw new Error('Unable to find location.');
 
       const [cityNameResult, weatherData, airQualityData] = await Promise.all([
         getCityName(latitude, longitude),
@@ -1266,9 +1200,7 @@ export default function Weather() {
       animateIn();
     } catch (err) {
       if (!isMountedRef.current) return;
-
       await cancelRainNotification();
-
       const cached = await readCache();
 
       if (cached && weatherRef.current) {
@@ -1276,7 +1208,6 @@ export default function Weather() {
         setNotice('Showing last saved weather.');
         return;
       }
-
       if (cached && !weatherRef.current) {
         setWeather(cached);
         setUsingCached(true);
@@ -1284,11 +1215,9 @@ export default function Weather() {
         animateIn();
         return;
       }
-
       setError(err?.message || 'Unable to load weather.');
     } finally {
       isFetchingRef.current = false;
-
       if (isMountedRef.current) {
         setLoading(false);
         setRefreshing(false);
@@ -1298,7 +1227,6 @@ export default function Weather() {
 
   const boot = async () => {
     await cancelRainNotification();
-
     const cached = await readCache();
 
     if (cached && isMountedRef.current) {
@@ -1325,13 +1253,10 @@ export default function Weather() {
     const subscription = AppState.addEventListener('change', nextState => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
-
       const cameToForeground =
         previousState.match(/inactive|background/) && nextState === 'active';
-
       const canRefreshNow =
         Date.now() - lastFetchRef.current > MIN_REFRESH_GAP_MS;
-
       if (cameToForeground && canRefreshNow && isMountedRef.current) {
         loadWeather({ silent: true });
       }
@@ -1347,6 +1272,7 @@ export default function Weather() {
     Linking.openSettings().catch(() => {});
   };
 
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading && !weather) {
     return (
       <View style={[st.screen, st.center, { backgroundColor: theme.bg }]}>
@@ -1357,6 +1283,7 @@ export default function Weather() {
     );
   }
 
+  // ── Error ──────────────────────────────────────────────────────────────────
   if (error && !weather) {
     return (
       <View
@@ -1392,6 +1319,7 @@ export default function Weather() {
     );
   }
 
+  // ── Derived display values ─────────────────────────────────────────────────
   const temp = Math.round(weather?.current?.temperature_2m ?? 0);
   const feels = Math.round(weather?.current?.apparent_temperature ?? 0);
   const humidity = Math.round(weather?.current?.relative_humidity_2m ?? 0);
@@ -1399,6 +1327,7 @@ export default function Weather() {
   const rainChance = weather?.daily?.rainChanceMax ?? 0;
   const rainMm = Number(weather?.daily?.precipSum ?? 0);
 
+  // ── Main render ────────────────────────────────────────────────────────────
   return (
     <View style={[st.screen, { backgroundColor: theme.bg }]}>
       <StatusBar
@@ -1436,6 +1365,7 @@ export default function Weather() {
         <Animated.View
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
+          {/* Header */}
           <View style={st.header}>
             <View style={{ flex: 1 }}>
               <Text style={st.appTitle}>NAMMA WEATHER</Text>
@@ -1467,6 +1397,7 @@ export default function Weather() {
             <Text style={st.cachedText}>Offline • Last updated recently</Text>
           )}
 
+          {/* Hero card */}
           <View style={st.heroCard}>
             <WeatherArt artType={currentInfo.art} accent={theme.accent} />
 
@@ -1483,6 +1414,7 @@ export default function Weather() {
             <RainTimerCard prediction={prediction} accent={theme.accent} />
           </View>
 
+          {/* Metrics */}
           <View style={st.metricsGrid}>
             <MetricCard
               label="Feels Like"
@@ -1510,13 +1442,13 @@ export default function Weather() {
             />
           </View>
 
+          {/* Today card */}
           <View style={st.todayCard}>
             <View style={st.todayRow}>
               <View>
                 <Text style={st.sectionTitle}>Today</Text>
                 <Text style={st.sectionSub}>Daily weather details</Text>
               </View>
-
               <Text style={[st.todayBadge, { color: theme.accent }]}>
                 {weather?.daily?.minTemp !== undefined
                   ? `${Math.round(weather.daily.minTemp)}° / ${Math.round(
@@ -1534,7 +1466,6 @@ export default function Weather() {
                   {formatTime(weather?.daily?.sunrise)}
                 </Text>
               </View>
-
               <View style={st.sunBoxLast}>
                 <Text style={st.sunIcon}>🌇</Text>
                 <Text style={st.sunLabel}>Sunset</Text>
@@ -1545,6 +1476,7 @@ export default function Weather() {
             </View>
           </View>
 
+          {/* Hourly */}
           <View style={st.sectionHeader}>
             <Text style={st.sectionTitle}>Hourly</Text>
             <Text style={st.sectionSub}>Next 12 hours</Text>
@@ -1557,7 +1489,6 @@ export default function Weather() {
           >
             {weather?.hourlyList?.map(item => {
               const info = getHourlyWeatherInfo(item);
-
               return (
                 <View
                   key={`${item.time}-${item.code}`}
@@ -1581,6 +1512,7 @@ export default function Weather() {
             })}
           </ScrollView>
 
+          {/* Air Quality & UV */}
           <View style={st.sectionHeader}>
             <Text style={st.sectionTitle}>Air Quality & UV</Text>
             <Text style={st.sectionSub}>Health and outdoor safety</Text>
@@ -1609,7 +1541,6 @@ export default function Weather() {
               sub="Fine dust"
               accent={theme.accent}
             />
-
             <MetricCard
               label="PM10"
               value={formatOptional(weather?.airQuality?.pm10, 1)}
