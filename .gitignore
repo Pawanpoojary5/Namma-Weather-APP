@@ -11,6 +11,6 @@ android/app/.cxx/
 
 # Native build outputs
 *.so
-
+.env
 # Node modules
 node_modules/
