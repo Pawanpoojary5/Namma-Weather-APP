@@ -1,72 +1,342 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Animated, Dimensions, StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
-const CARD_H = 220;
 const arr = n => Array.from({ length: n }, (_, i) => i);
 
-// ─── CLOUD SHAPE ─────────────────────────────────────────────────────────────
-// Fluffy multi-bubble cloud. Centered via style prop.
+// ─── GRADIENTS PER WEATHER STATE ─────────────────────────────────────────────
+export const SKY_GRADIENTS = {
+  sunny: ['#0F2027', '#1A3A5C', '#2C6E94'],
+  partlyCloudy: ['#0A1628', '#162840', '#1E3D5C'],
+  cloudy: ['#0A1020', '#111C30', '#182540'],
+  clearNight: ['#020610', '#06102A', '#0C1A40'],
+  rain: ['#060C18', '#0C1828', '#0F2038'],
+  storm: ['#030608', '#080E18', '#0C1420'],
+  snow: ['#0A1428', '#162038', '#1C2C48'],
+  fog: ['#0C1420', '#14202E', '#1A2A3C'],
+};
+
+// ─── ACCENT COLOR PER STATE ───────────────────────────────────────────────────
+export const getAccent = art => {
+  const map = {
+    sunny: '#FFB347',
+    partlyCloudy: '#67C6E3',
+    cloudy: '#8BA4C8',
+    clearNight: '#A78BFA',
+    rain: '#00D4FF',
+    storm: '#FFD700',
+    snow: '#B8D4F0',
+    fog: '#94B0C8',
+  };
+  return map[art] || '#00D4FF';
+};
+
+// ─── PARALLAX STAR ───────────────────────────────────────────────────────────
+const Star = ({ x, y, size, twinkleDelay }) => {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(twinkleDelay),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.2,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.7,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    anim.start();
+    return () => {
+      anim.stop();
+      opacity.stopAnimation();
+    };
+  }, [opacity, twinkleDelay]);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y,
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#FFFFFF',
+        opacity,
+        shadowColor: '#FFFFFF',
+        shadowOpacity: 0.8,
+        shadowRadius: size * 2,
+        shadowOffset: { width: 0, height: 0 },
+      }}
+    />
+  );
+};
+
+// ─── SHOOTING STAR ───────────────────────────────────────────────────────────
+const ShootingStar = ({ delay }) => {
+  const x = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  const startX = useMemo(() => Math.random() * width * 0.6, []);
+  const startY = useMemo(() => Math.random() * height * 0.4, []);
+
+  useEffect(() => {
+    const run = () => {
+      x.setValue(0);
+      opacity.setValue(0);
+      Animated.sequence([
+        Animated.delay(delay + Math.random() * 6000),
+        Animated.parallel([
+          Animated.timing(x, {
+            toValue: 180,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.sequence([
+            Animated.timing(opacity, {
+              toValue: 1,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(opacity, {
+              toValue: 0,
+              duration: 600,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]),
+      ]).start(() => setTimeout(run, 5000 + Math.random() * 8000));
+    };
+    run();
+  }, [delay, opacity, x]);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: startX,
+        top: startY,
+        width: 80,
+        height: 1.5,
+        borderRadius: 1,
+        backgroundColor: '#FFFFFF',
+        opacity,
+        transform: [{ translateX: x }, { rotate: '20deg' }],
+        shadowColor: '#FFFFFF',
+        shadowOpacity: 0.9,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 0 },
+      }}
+    />
+  );
+};
+
+// ─── MOON ─────────────────────────────────────────────────────────────────────
+// inSky=true → positioned in SkyBackground (absolute to screen)
+// inSky=false → used inside WeatherArt hero card (relative, centered)
+const Moon = ({ inSky = false }) => {
+  const glow = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, {
+          toValue: 1.15,
+          duration: 3000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glow, {
+          toValue: 1,
+          duration: 3000,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    anim.start();
+    return () => {
+      anim.stop();
+      glow.stopAnimation();
+    };
+  }, [glow]);
+
+  // In sky: small ambient moon top-right, well below status bar
+  if (inSky)
+    return (
+      <Animated.View style={[s.moonSkyWrap, { transform: [{ scale: glow }] }]}>
+        <View style={s.moonBody} />
+        <View style={[s.moonMask, { backgroundColor: '#06102A' }]} />
+      </Animated.View>
+    );
+
+  // In hero card: larger, centered
+  return (
+    <Animated.View style={[s.moonHeroWrap, { transform: [{ scale: glow }] }]}>
+      <View style={s.moonHeroBody} />
+      <View style={[s.moonHeroMask, { backgroundColor: '#06102A' }]} />
+    </Animated.View>
+  );
+};
+
+// ─── SUN ──────────────────────────────────────────────────────────────────────
+// inSky=true → small ambient glow in top portion of sky, won't overlap header
+// inSky=false (default) → full-size animated sun inside the hero card
+const Sun = ({ accent, inSky = false }) => {
+  const spin = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: inSky ? 30000 : 20000,
+        useNativeDriver: true,
+      }),
+    ).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: inSky ? 1.05 : 1.08,
+          duration: 2500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 2500,
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+    return () => {
+      spin.stopAnimation();
+      pulse.stopAnimation();
+    };
+  }, [inSky, pulse, spin]);
+
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  // Sky version: small, positioned top-center, safely below header overlap zone
+  if (inSky) {
+    const a = accent || '#FFB347';
+    return (
+      <View style={s.sunSkyWrap}>
+        <Animated.View
+          style={[
+            s.sunSkyGlow,
+            { transform: [{ scale: pulse }], borderColor: a + '16' },
+          ]}
+        />
+        <Animated.View style={[s.sunSkyRays, { transform: [{ rotate }] }]}>
+          {arr(12).map(i => (
+            <View
+              key={i}
+              style={[
+                s.sunSkyRay,
+                {
+                  backgroundColor: a,
+                  transform: [{ rotate: `${i * 30}deg` }, { translateY: -34 }],
+                },
+              ]}
+            />
+          ))}
+        </Animated.View>
+        <View style={[s.sunSkyCore, { backgroundColor: a, shadowColor: a }]} />
+      </View>
+    );
+  }
+
+  // Hero card version: full size
+  return (
+    <View style={s.sunWrap}>
+      <Animated.View
+        style={[
+          s.sunGlowOuter,
+          {
+            transform: [{ scale: pulse }],
+            borderColor: (accent || '#FFB347') + '18',
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          s.sunGlowMid,
+          {
+            transform: [{ scale: pulse }],
+            borderColor: (accent || '#FFB347') + '28',
+          },
+        ]}
+      />
+      <Animated.View style={[s.raysWrap, { transform: [{ rotate }] }]}>
+        {arr(12).map(i => (
+          <View
+            key={i}
+            style={[
+              s.ray,
+              {
+                backgroundColor: accent || '#FFB347',
+                transform: [{ rotate: `${i * 30}deg` }, { translateY: -56 }],
+              },
+            ]}
+          />
+        ))}
+      </Animated.View>
+      <View
+        style={[
+          s.sunCore,
+          {
+            backgroundColor: accent || '#FFB347',
+            shadowColor: accent || '#FFB347',
+          },
+        ]}
+      />
+    </View>
+  );
+};
+
+// ─── CLOUD ────────────────────────────────────────────────────────────────────
+// Redesigned — softer, Gen Z frosted look with a subtle gradient shimmer
 const Cloud = ({
-  color = '#E8EEF2',
-  shade = '#B8C8D4',
+  color = '#C8D8E8',
+  shade = '#8AAAC0',
   scale = 1,
   opacity = 1,
   style,
 }) => (
-  <View
-    style={[s.cloudWrap, style, { opacity, transform: [{ scale }] }]}
-    needsOffscreenAlphaCompositing
-    renderToHardwareTextureAndroid
-  >
-    {/* shadow layer */}
+  <View style={[s.cloudWrap, style, { opacity, transform: [{ scale }] }]}>
     <View style={[s.cShadow, { backgroundColor: shade }]} />
-    {/* base body */}
     <View style={[s.cBase, { backgroundColor: color }]} />
-    {/* left bump */}
-    <View style={[s.cBumpLeft, { backgroundColor: color }]} />
-    {/* center top dome — tallest */}
-    <View style={[s.cDomeTop, { backgroundColor: color }]} />
-    {/* right bump */}
-    <View style={[s.cBumpRight, { backgroundColor: color }]} />
-    {/* bottom shade stripe */}
+    <View style={[s.cBumpL, { backgroundColor: color }]} />
+    <View style={[s.cDome, { backgroundColor: color }]} />
+    <View style={[s.cBumpR, { backgroundColor: color }]} />
     <View style={[s.cShadeBar, { backgroundColor: shade }]} />
   </View>
 );
 
-// Tiny decorative cloud for backgrounds
-const TinyCloud = ({ color = '#FFFFFF', opacity = 0.18, style }) => (
-  <View
-    style={[s.tinyCloudWrap, style, { opacity }]}
-    needsOffscreenAlphaCompositing
-    renderToHardwareTextureAndroid
-  >
-    <View style={[s.tcBase, { backgroundColor: color }]} />
-    <View style={[s.tcDomeL, { backgroundColor: color }]} />
-    <View style={[s.tcDomeR, { backgroundColor: color }]} />
-  </View>
-);
-
-// Slowly drifts from left off-screen to right off-screen, loops
-const DriftingCloud = ({
-  top,
-  scale,
-  duration,
-  delay,
-  opacity,
-  color,
-  shade,
-}) => {
-  const x = useRef(new Animated.Value(-(210 * scale))).current;
+// Drifting cloud animation
+const DriftCloud = ({ top, scale, duration, delay, opacity, color, shade }) => {
+  const x = useRef(new Animated.Value(-(220 * scale))).current;
 
   useEffect(() => {
-    x.setValue(-(210 * scale));
+    x.setValue(-(220 * scale));
     const anim = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
         Animated.timing(x, {
-          toValue: width + 230,
+          toValue: width + 260,
           duration,
           useNativeDriver: true,
         }),
@@ -81,1118 +351,807 @@ const DriftingCloud = ({
 
   return (
     <Animated.View
-      style={[s.absolute, { top, transform: [{ translateX: x }] }]}
+      style={{ position: 'absolute', top, transform: [{ translateX: x }] }}
     >
       <Cloud scale={scale} opacity={opacity} color={color} shade={shade} />
     </Animated.View>
   );
 };
 
-// ─── SUN ─────────────────────────────────────────────────────────────────────
-const SunRays = ({ accent }) => {
-  const spin = useRef(new Animated.Value(0)).current;
+// ─── RAIN SYSTEM ──────────────────────────────────────────────────────────────
+const RainDrop = ({ x, delay, speed, isHeavy }) => {
+  const y = useRef(new Animated.Value(-60)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 12000,
-        useNativeDriver: true,
-      }),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      spin.stopAnimation();
-    };
-  }, [spin]);
-
-  const rotate = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  return (
-    <Animated.View style={[s.raysWrap, { transform: [{ rotate }] }]}>
-      {arr(12).map(i => (
-        <View
-          key={i}
-          style={[
-            s.ray,
-            {
-              backgroundColor: accent || '#FCD34D',
-              transform: [{ rotate: `${i * 30}deg` }, { translateY: -52 }],
-            },
-          ]}
-        />
-      ))}
-    </Animated.View>
-  );
-};
-
-// Gentle pulse on sun glow
-const SunGlow = ({ accent }) => {
-  const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, {
-          toValue: 1.08,
-          duration: 2200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 1,
-          duration: 2200,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      scale.stopAnimation();
-    };
-  }, [scale]);
-
-  return (
-    <Animated.View
-      style={[
-        s.sunGlow,
-        { backgroundColor: accent || '#FCD34D', transform: [{ scale }] },
-      ]}
-    />
-  );
-};
-
-// ─── RAIN DROP ────────────────────────────────────────────────────────────────
-const RainDrop = ({ left, delay, duration, dropHeight, opacity }) => {
-  const y = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    y.setValue(0);
-    const anim = Animated.loop(
+    const run = () => {
+      y.setValue(-60);
+      opacity.setValue(0);
       Animated.sequence([
         Animated.delay(delay),
-        Animated.timing(y, { toValue: 1, duration, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      y.stopAnimation();
-    };
-  }, [delay, duration, y]);
-
-  const translateY = y.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-55, CARD_H + 75],
-  });
-
-  return (
-    <Animated.View
-      style={[
-        s.rainDrop,
-        {
-          left,
-          height: dropHeight,
-          opacity,
-          transform: [{ translateY }, { rotate: '12deg' }],
-        },
-      ]}
-    />
-  );
-};
-
-// ─── SNOWFLAKE ────────────────────────────────────────────────────────────────
-const SnowFlake = ({ left, size, delay, duration, drift }) => {
-  const p = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    p.setValue(0);
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(p, { toValue: 1, duration, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      p.stopAnimation();
-    };
-  }, [delay, duration, p]);
-
-  const translateY = p.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-24, CARD_H + 34],
-  });
-  const translateX = p.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0, drift, 0],
-  });
-  const opacity = p.interpolate({
-    inputRange: [0, 0.1, 0.9, 1],
-    outputRange: [0, 1, 1, 0],
-  });
-
-  return (
-    <Animated.View
-      style={[
-        s.snow,
-        {
-          left,
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          opacity,
-          transform: [{ translateY }, { translateX }],
-        },
-      ]}
-    />
-  );
-};
-
-// ─── STAR ─────────────────────────────────────────────────────────────────────
-const Star = ({ left, top, size, delay }) => {
-  const opacity = useRef(new Animated.Value(0.2)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 1400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.2,
-          duration: 1400,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      opacity.stopAnimation();
-    };
-  }, [delay, opacity]);
-
-  return (
-    <Animated.View
-      style={[
-        s.star,
-        {
-          left,
-          top,
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          opacity,
-        },
-      ]}
-    />
-  );
-};
-
-// ─── FOG BAR ──────────────────────────────────────────────────────────────────
-const FogBar = ({ top, barWidth, delay, duration, maxOpacity }) => {
-  const p = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(p, { toValue: 1, duration, useNativeDriver: true }),
-        Animated.timing(p, { toValue: 0, duration, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      p.stopAnimation();
-    };
-  }, [delay, duration, p]);
-
-  const translateX = p.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-52, 52],
-  });
-  const opacity = p.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [maxOpacity * 0.4, maxOpacity, maxOpacity * 0.4],
-  });
-
-  return (
-    <Animated.View
-      style={[
-        s.fogBar,
-        { top, width: barWidth, opacity, transform: [{ translateX }] },
-      ]}
-    />
-  );
-};
-
-// ─── SCENES ───────────────────────────────────────────────────────────────────
-
-// SUNNY — warm sky, centered sun with rays + glow, clean sky
-const SunnyScene = ({ accent }) => (
-  <LinearGradient colors={['#1E4A6E', '#0D2A45', '#091929']} style={s.fill}>
-    <View style={s.skyGlow} />
-    <View style={s.sunWrap}>
-      <SunGlow accent={accent} />
-      <SunRays accent={accent} />
-      <View style={[s.sunCircle, { backgroundColor: accent || '#FCD34D' }]} />
-    </View>
-  </LinearGradient>
-);
-
-// PARTLY CLOUDY — sun visible behind one main cloud
-const PartlyCloudyScene = ({ accent }) => {
-  const cloudOpacity = useRef(new Animated.Value(0.88)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(cloudOpacity, {
-          toValue: 1,
-          duration: 3000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(cloudOpacity, {
-          toValue: 0.88,
-          duration: 3000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      cloudOpacity.stopAnimation();
-    };
-  }, [cloudOpacity]);
-
-  return (
-    <LinearGradient colors={['#1E3A52', '#0F2235', '#091929']} style={s.fill}>
-      {/* Sun peeking top-right behind cloud */}
-      <View style={s.partSunWrap}>
-        <SunRays accent={accent} />
-        <View style={[s.sunCircle, { backgroundColor: accent || '#FCD34D' }]} />
-      </View>
-
-      {/* Main cloud over sun */}
-      <Animated.View style={[s.mainCloudWrap, { opacity: cloudOpacity }]}>
-        <Cloud scale={1.1} color="#D8E4EC" shade="#8FA3AE" />
-      </Animated.View>
-
-      <DriftingCloud
-        top={150}
-        scale={0.3}
-        duration={42000}
-        delay={2000}
-        opacity={0.12}
-        color="#C8D8E4"
-        shade="#8FA3AE"
-      />
-    </LinearGradient>
-  );
-};
-
-// CLOUDY — overcast, three layered clouds, subtle movement
-const CloudyScene = () => {
-  const shift1 = useRef(new Animated.Value(0)).current;
-  const shift2 = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const a1 = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shift1, {
-          toValue: 8,
-          duration: 6000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shift1, {
-          toValue: -8,
-          duration: 6000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    const a2 = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shift2, {
-          toValue: -10,
-          duration: 7500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shift2, {
-          toValue: 10,
-          duration: 7500,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    a1.start();
-    a2.start();
-    return () => {
-      a1.stop();
-      a2.stop();
-      shift1.stopAnimation();
-      shift2.stopAnimation();
-    };
-  }, [shift1, shift2]);
-
-  return (
-    <LinearGradient colors={['#2C3A47', '#1A2530', '#0F1920']} style={s.fill}>
-      {/* back cloud — smaller, darker */}
-      <Animated.View
-        style={[
-          s.absolute,
-          { top: 20, left: '10%', transform: [{ translateX: shift2 }] },
-        ]}
-      >
-        <Cloud scale={0.72} opacity={0.55} color="#8FA3AE" shade="#607080" />
-      </Animated.View>
-
-      {/* main center cloud */}
-      <Animated.View
-        style={[
-          s.absolute,
-          { top: 50, left: '20%', transform: [{ translateX: shift1 }] },
-        ]}
-      >
-        <Cloud scale={1.05} opacity={1} color="#C8D4DC" shade="#7A8E9A" />
-      </Animated.View>
-
-      {/* front cloud — bottom left, gives depth */}
-      <Animated.View
-        style={[
-          s.absolute,
-          { top: 110, left: '-5%', transform: [{ translateX: shift2 }] },
-        ]}
-      >
-        <Cloud scale={0.65} opacity={0.7} color="#A0B4BE" shade="#607080" />
-      </Animated.View>
-
-      <DriftingCloud
-        top={10}
-        scale={0.26}
-        duration={48000}
-        delay={0}
-        opacity={0.12}
-        color="#8FA3AE"
-        shade="#607080"
-      />
-    </LinearGradient>
-  );
-};
-
-// RAIN — dark clouds, many drops
-const RainScene = ({ heavy = false }) => {
-  const drops = useMemo(
-    () =>
-      arr(heavy ? 32 : 24).map(i => ({
-        left: (i * 23) % Math.max(width - 30, 280),
-        delay: i * (heavy ? 40 : 70),
-        duration: heavy ? 500 : 720,
-        dropHeight: heavy ? 36 : 24,
-        opacity: heavy ? 0.82 : 0.58,
-      })),
-    [heavy],
-  );
-
-  return (
-    <LinearGradient colors={['#1A2535', '#0D1520', '#060E18']} style={s.fill}>
-      {/* two dark rain clouds */}
-      <View style={[s.absolute, { top: 18, left: '5%' }]}>
-        <Cloud scale={1.05} opacity={0.95} color="#8A9BA8" shade="#4A5A68" />
-      </View>
-      <View style={[s.absolute, { top: 55, left: '45%' }]}>
-        <Cloud scale={0.72} opacity={0.75} color="#7A8B98" shade="#3E4E5C" />
-      </View>
-
-      {drops.map(item => (
-        <RainDrop key={`${item.left}-${item.delay}`} {...item} />
-      ))}
-    </LinearGradient>
-  );
-};
-
-// STORM — rain + lightning flash
-const StormScene = () => {
-  const flash = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(1200),
-        Animated.timing(flash, {
-          toValue: 0.72,
-          duration: 60,
-          useNativeDriver: true,
-        }),
-        Animated.timing(flash, {
-          toValue: 0,
-          duration: 140,
-          useNativeDriver: true,
-        }),
-        Animated.delay(220),
-        Animated.timing(flash, {
-          toValue: 0.42,
-          duration: 55,
-          useNativeDriver: true,
-        }),
-        Animated.timing(flash, {
-          toValue: 0,
-          duration: 160,
-          useNativeDriver: true,
-        }),
-        Animated.delay(1600),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
-      flash.stopAnimation();
-    };
-  }, [flash]);
-
-  return (
-    <View style={s.fill}>
-      <RainScene heavy />
-      {/* lightning bolt */}
-      <View style={s.boltWrap}>
-        <View style={s.boltTop} />
-        <View style={s.boltBottom} />
-      </View>
-      <Animated.View style={[s.flash, { opacity: flash }]} />
-    </View>
-  );
-};
-
-// SNOW — pale blue sky, flakes drifting down
-const SnowScene = () => {
-  const flakes = useMemo(
-    () =>
-      arr(26).map(i => ({
-        left: (i * 31) % Math.max(width - 20, 280),
-        size: 3 + (i % 5),
-        delay: i * 90,
-        duration: 3800 + (i % 6) * 300,
-        drift: i % 2 === 0 ? 16 : -16,
-      })),
-    [],
-  );
-
-  return (
-    <LinearGradient colors={['#B8CDD8', '#7A9AAE', '#4A6A7E']} style={s.fill}>
-      <View style={[s.absolute, { top: 30, left: '15%' }]}>
-        <Cloud scale={0.82} opacity={0.9} color="#EAEFF2" shade="#B8C8D2" />
-      </View>
-      <View style={[s.absolute, { top: 80, left: '50%' }]}>
-        <Cloud scale={0.55} opacity={0.65} color="#D8E4EA" shade="#A0B4BE" />
-      </View>
-      {flakes.map(item => (
-        <SnowFlake key={`${item.left}-${item.delay}`} {...item} />
-      ))}
-    </LinearGradient>
-  );
-};
-
-// CLEAR NIGHT — deep navy, crescent moon, twinkling stars
-const ClearNightScene = () => {
-  const stars = useMemo(
-    () =>
-      arr(28).map(i => ({
-        left: 10 + ((i * 41) % (width - 20)),
-        top: 8 + ((i * 29) % 140),
-        size: 1.5 + (i % 3) * 0.8,
-        delay: i * 110,
-      })),
-    [],
-  );
-
-  // Shooting star
-  const shotX = useRef(new Animated.Value(-60)).current;
-  const shotY = useRef(new Animated.Value(20)).current;
-  const shotO = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const shoot = () => {
-      shotX.setValue(-60);
-      shotY.setValue(20);
-      shotO.setValue(0);
-      Animated.sequence([
-        Animated.delay(4000 + Math.random() * 5000),
         Animated.parallel([
-          Animated.timing(shotX, {
-            toValue: width * 0.7,
-            duration: 700,
-            useNativeDriver: true,
-          }),
-          Animated.timing(shotY, {
-            toValue: 90,
-            duration: 700,
+          Animated.timing(y, {
+            toValue: height + 40,
+            duration: speed,
             useNativeDriver: true,
           }),
           Animated.sequence([
-            Animated.timing(shotO, {
-              toValue: 1,
-              duration: 120,
+            Animated.timing(opacity, {
+              toValue: isHeavy ? 0.75 : 0.5,
+              duration: 60,
               useNativeDriver: true,
             }),
-            Animated.timing(shotO, {
+            Animated.timing(opacity, {
+              toValue: isHeavy ? 0.65 : 0.4,
+              duration: speed - 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(opacity, {
               toValue: 0,
-              duration: 580,
+              duration: 80,
               useNativeDriver: true,
             }),
           ]),
         ]),
-      ]).start(shoot);
+      ]).start(run);
     };
-    shoot();
+    run();
     return () => {
-      shotX.stopAnimation();
-      shotY.stopAnimation();
-      shotO.stopAnimation();
-    };
-  }, [shotO, shotX, shotY]);
-
-  return (
-    <LinearGradient colors={['#040C18', '#081628', '#0C2040']} style={s.fill}>
-      {/* stars */}
-      {stars.map(item => (
-        <Star key={`${item.left}-${item.top}`} {...item} />
-      ))}
-
-      {/* shooting star */}
-      <Animated.View
-        style={[
-          s.shootingStar,
-          {
-            opacity: shotO,
-            transform: [{ translateX: shotX }, { translateY: shotY }],
-          },
-        ]}
-      />
-
-      {/* moon — crescent via offset circle mask */}
-      <View style={s.moonWrap}>
-        <View style={s.moonBody} />
-        <View style={s.moonMask} />
-      </View>
-    </LinearGradient>
-  );
-};
-
-// FOG — muted grey, layered fog bands sliding slowly
-const FogScene = () => (
-  <LinearGradient colors={['#8A9BA6', '#5C6E78', '#3A4E58']} style={s.fill}>
-    <View style={[s.absolute, { top: 20, left: '10%' }]}>
-      <Cloud scale={0.75} opacity={0.28} color="#D8E4EA" shade="#9AAAB4" />
-    </View>
-    <FogBar
-      top={55}
-      barWidth={width * 0.9}
-      delay={0}
-      duration={5500}
-      maxOpacity={0.72}
-    />
-    <FogBar
-      top={85}
-      barWidth={width * 1.1}
-      delay={500}
-      duration={7000}
-      maxOpacity={0.58}
-    />
-    <FogBar
-      top={115}
-      barWidth={width * 0.8}
-      delay={900}
-      duration={6000}
-      maxOpacity={0.65}
-    />
-    <FogBar
-      top={148}
-      barWidth={width * 1.0}
-      delay={1400}
-      duration={8000}
-      maxOpacity={0.45}
-    />
-    <FogBar
-      top={178}
-      barWidth={width * 0.7}
-      delay={200}
-      duration={6500}
-      maxOpacity={0.5}
-    />
-  </LinearGradient>
-);
-
-// ─── WEATHER ART CARD ─────────────────────────────────────────────────────────
-export const WeatherArt = ({ artType = 'cloudy', accent = '#67E8F9' }) => {
-  const scene = useMemo(() => {
-    switch (artType) {
-      case 'sunny':
-        return <SunnyScene accent={accent} />;
-      case 'partlyCloudy':
-        return <PartlyCloudyScene accent={accent} />;
-      case 'rain':
-        return <RainScene />;
-      case 'storm':
-        return <StormScene />;
-      case 'snow':
-        return <SnowScene />;
-      case 'clearNight':
-        return <ClearNightScene />;
-      case 'fog':
-        return <FogScene />;
-      case 'cloudy':
-      default:
-        return <CloudyScene />;
-    }
-  }, [accent, artType]);
-
-  return <View style={s.card}>{scene}</View>;
-};
-
-// ─── SKY BACKGROUND (full screen behind scroll) ───────────────────────────────
-export const SkyBackground = ({ weatherArt, isDay }) => {
-  const cloudX = useRef(new Animated.Value(-180)).current;
-  const fogX = useRef(new Animated.Value(-80)).current;
-
-  const isFog = weatherArt === 'fog';
-  const isStorm = weatherArt === 'storm' || weatherArt === 'rain';
-  const showLayer = isStorm || isFog;
-
-  useEffect(() => {
-    const cloudAnim = Animated.loop(
-      Animated.timing(cloudX, {
-        toValue: width + 180,
-        duration: isStorm ? 16000 : 32000,
-        useNativeDriver: true,
-      }),
-    );
-    const fogAnim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(fogX, {
-          toValue: 80,
-          duration: 9000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fogX, {
-          toValue: -80,
-          duration: 9000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    if (showLayer) {
-      cloudX.setValue(-180);
-      cloudAnim.start();
-      fogAnim.start();
-    }
-
-    return () => {
-      cloudAnim.stop();
-      fogAnim.stop();
-      cloudX.stopAnimation();
-      fogX.stopAnimation();
-    };
-  }, [cloudX, fogX, isStorm, showLayer]);
-
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            backgroundColor: isDay
-              ? isStorm
-                ? '#1A2535'
-                : '#0F172A'
-              : '#060C18',
-          },
-        ]}
-      />
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            backgroundColor: isStorm
-              ? 'rgba(12,20,36,0.65)'
-              : 'rgba(28,38,52,0.25)',
-          },
-        ]}
-      />
-
-      {showLayer && (
-        <>
-          <Animated.View
-            style={{
-              position: 'absolute',
-              top: 60,
-              left: 0,
-              transform: [{ translateX: cloudX }],
-            }}
-          >
-            <Cloud
-              scale={0.6}
-              opacity={isStorm ? 0.16 : 0.1}
-              color="#8A9BA8"
-              shade="#5A6A78"
-            />
-          </Animated.View>
-          <Animated.View
-            style={[
-              s.bgFogBar,
-              {
-                opacity: isFog ? 0.42 : 0.1,
-                transform: [{ translateX: fogX }],
-              },
-            ]}
-          />
-        </>
-      )}
-    </View>
-  );
-};
-
-// ─── RAIN SYSTEM (full screen drops) ─────────────────────────────────────────
-const BgRainDrop = ({ left, delay, duration, isHeavy }) => {
-  const y = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    y.setValue(0);
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(y, { toValue: 1, duration, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => {
-      anim.stop();
       y.stopAnimation();
+      opacity.stopAnimation();
     };
-  }, [delay, duration, y]);
-
-  const translateY = y.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-60, height + 80],
-  });
+  }, [delay, isHeavy, opacity, speed, y]);
 
   return (
     <Animated.View
-      style={[
-        s.bgRainDrop,
-        {
-          left,
-          height: isHeavy ? 42 : 26,
-          opacity: isHeavy ? 0.48 : 0.26,
-          transform: [{ translateY }, { rotate: '12deg' }],
-        },
-      ]}
+      style={{
+        position: 'absolute',
+        left: x,
+        top: 0,
+        width: isHeavy ? 2 : 1.4,
+        height: isHeavy ? 22 : 15,
+        borderRadius: 2,
+        backgroundColor: '#A8DCEF',
+        opacity,
+        transform: [{ translateY: y }, { skewX: '-8deg' }],
+      }}
     />
   );
 };
 
-export const RainSystem = ({ isRaining, isHeavyRain }) => {
-  const drops = useMemo(() => {
-    const count = isHeavyRain ? 28 : 18;
-    return arr(count).map(i => ({
-      left: (i * 29) % Math.max(width - 20, 280),
-      delay: i * (isHeavyRain ? 50 : 90),
-      duration: isHeavyRain ? 600 : 880,
-    }));
-  }, [isHeavyRain]);
+export const RainSystem = ({ isRaining, isHeavy }) => {
+  const count = isHeavy ? 60 : 32;
+  const drops = useMemo(
+    () =>
+      arr(count).map(i => ({
+        x: (i / count) * width + (Math.random() * 24 - 12),
+        delay: Math.random() * 1800,
+        speed: isHeavy ? 500 + Math.random() * 300 : 750 + Math.random() * 500,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isRaining, isHeavy],
+  );
 
   if (!isRaining) return null;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {drops.map(item => (
-        <BgRainDrop
-          key={`${item.left}-${item.delay}`}
-          {...item}
-          isHeavy={isHeavyRain}
+      {drops.map((d, i) => (
+        <RainDrop
+          key={i}
+          x={d.x}
+          delay={d.delay}
+          speed={d.speed}
+          isHeavy={isHeavy}
         />
       ))}
+    </View>
+  );
+};
+
+// ─── SNOW SYSTEM ──────────────────────────────────────────────────────────────
+const Flake = ({ x, delay, size }) => {
+  const y = useRef(new Animated.Value(-20)).current;
+  const drift = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const run = () => {
+      y.setValue(-20);
+      drift.setValue(0);
+      Animated.parallel([
+        Animated.timing(y, {
+          toValue: height + 20,
+          duration: 5000 + Math.random() * 3000,
+          useNativeDriver: true,
+        }),
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(drift, {
+              toValue: 18,
+              duration: 1500,
+              useNativeDriver: true,
+            }),
+            Animated.timing(drift, {
+              toValue: -18,
+              duration: 1500,
+              useNativeDriver: true,
+            }),
+          ]),
+        ),
+      ]).start(run);
+    };
+    const t = setTimeout(run, delay);
+    return () => {
+      clearTimeout(t);
+      y.stopAnimation();
+      drift.stopAnimation();
+    };
+  }, [delay, drift, y]);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: x,
+        top: 0,
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#E8F0F8',
+        opacity: 0.75,
+        transform: [{ translateY: y }, { translateX: drift }],
+      }}
+    />
+  );
+};
+
+const SnowSystem = () => {
+  const flakes = useMemo(
+    () =>
+      arr(28).map(i => ({
+        x: (i / 28) * width,
+        delay: Math.random() * 4000,
+        size: 3 + Math.random() * 5,
+      })),
+    [],
+  );
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {flakes.map((f, i) => (
+        <Flake key={i} x={f.x} delay={f.delay} size={f.size} />
+      ))}
+    </View>
+  );
+};
+
+// ─── FOG BARS ─────────────────────────────────────────────────────────────────
+const FogBar = ({ top, delay, opacity: op }) => {
+  const x = useRef(new Animated.Value(-width * 0.3)).current;
+  const fade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.parallel([
+          Animated.timing(fade, {
+            toValue: op,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(x, {
+            toValue: width * 0.15,
+            duration: 7000,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(fade, {
+            toValue: 0,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(x, {
+            toValue: width * 0.3,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    ).start();
+    return () => {
+      x.stopAnimation();
+      fade.stopAnimation();
+    };
+  }, [delay, fade, op, x]);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: -60,
+        top,
+        width: width + 120,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: '#C8D8E0',
+        opacity: fade,
+        transform: [{ translateX: x }],
+      }}
+    />
+  );
+};
+
+// ─── STORM ────────────────────────────────────────────────────────────────────
+const LightningBolt = () => {
+  const flashOpacity = useRef(new Animated.Value(0)).current;
+  const boltOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const strike = () => {
+      Animated.sequence([
+        Animated.timing(flashOpacity, {
+          toValue: 0.35,
+          duration: 40,
+          useNativeDriver: true,
+        }),
+        Animated.timing(flashOpacity, {
+          toValue: 0,
+          duration: 60,
+          useNativeDriver: true,
+        }),
+        Animated.delay(80),
+        Animated.timing(flashOpacity, {
+          toValue: 0.2,
+          duration: 40,
+          useNativeDriver: true,
+        }),
+        Animated.timing(flashOpacity, {
+          toValue: 0,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      Animated.sequence([
+        Animated.timing(boltOpacity, {
+          toValue: 1,
+          duration: 30,
+          useNativeDriver: true,
+        }),
+        Animated.timing(boltOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      setTimeout(strike, 3500 + Math.random() * 5000);
+    };
+    const t = setTimeout(strike, 1000 + Math.random() * 2000);
+    return () => {
+      clearTimeout(t);
+      flashOpacity.stopAnimation();
+      boltOpacity.stopAnimation();
+    };
+  }, [boltOpacity, flashOpacity]);
+
+  return (
+    <>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: '#FFFFFF', opacity: flashOpacity },
+        ]}
+        pointerEvents="none"
+      />
+      <Animated.View
+        style={[s.boltWrap, { opacity: boltOpacity }]}
+        pointerEvents="none"
+      >
+        <View style={s.boltTop} />
+        <View style={s.boltBottom} />
+      </Animated.View>
+    </>
+  );
+};
+
+// ─── SKY BACKGROUND ───────────────────────────────────────────────────────────
+export const SkyBackground = ({ weatherArt, isDay }) => {
+  const art = weatherArt || 'cloudy';
+  const gradKey = isDay ? art : 'clearNight';
+  const gradient = SKY_GRADIENTS[gradKey] || SKY_GRADIENTS.cloudy;
+
+  const isNight = !isDay;
+  const showStars = isNight || art === 'clearNight';
+  const showSun = isDay && (art === 'sunny' || art === 'partlyCloudy');
+  const showMoon = isNight || art === 'clearNight';
+  const showClouds = [
+    'cloudy',
+    'partlyCloudy',
+    'rain',
+    'storm',
+    'snow',
+    'fog',
+  ].includes(art);
+  const showFog = art === 'fog';
+  const showSnow = art === 'snow';
+  const showStorm = art === 'storm';
+
+  const stars = useMemo(
+    () =>
+      arr(55).map(() => ({
+        x: Math.random() * width,
+        y: Math.random() * (height * 0.55),
+        size: 1 + Math.random() * 2.5,
+        delay: Math.random() * 4000,
+      })),
+    [],
+  );
+
+  return (
+    // zIndex: -1 keeps the entire sky layer BEHIND all UI cards/text
+    <View
+      style={[StyleSheet.absoluteFill, { zIndex: -1 }]}
+      pointerEvents="none"
+    >
+      <LinearGradient
+        colors={gradient}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.3, y: 1 }}
+      />
+
+      {showStars &&
+        stars.map((star, i) => (
+          <Star key={i} {...star} twinkleDelay={star.delay} />
+        ))}
+      {showStars && arr(3).map(i => <ShootingStar key={i} delay={i * 4000} />)}
+
+      {/* Sun/Moon removed from sky — they render only inside WeatherArt hero card */}
+
+      {showClouds && (
+        <>
+          {/* All cloud tops start at y≥220 so they never touch the header */}
+          <DriftCloud
+            top={220}
+            scale={1.1}
+            duration={38000}
+            delay={0}
+            opacity={art === 'cloudy' ? 0.55 : 0.32}
+            color={isNight ? '#1A2840' : '#C8D8E8'}
+            shade={isNight ? '#0E1A2C' : '#8AAAC0'}
+          />
+          <DriftCloud
+            top={300}
+            scale={0.85}
+            duration={48000}
+            delay={12000}
+            opacity={art === 'cloudy' ? 0.42 : 0.22}
+            color={isNight ? '#142036' : '#D8E8F4'}
+            shade={isNight ? '#0A1624' : '#9ABCD0'}
+          />
+          {(art === 'cloudy' || art === 'rain' || art === 'storm') && (
+            <DriftCloud
+              top={260}
+              scale={1.25}
+              duration={55000}
+              delay={25000}
+              opacity={0.48}
+              color={isNight ? '#0E1828' : '#B0C4D8'}
+              shade={isNight ? '#080E1A' : '#7A9AB4'}
+            />
+          )}
+        </>
+      )}
+
+      {showFog && (
+        <>
+          <FogBar top={300} delay={0} opacity={0.18} />
+          <FogBar top={420} delay={2000} opacity={0.14} />
+          <FogBar top={520} delay={4000} opacity={0.12} />
+        </>
+      )}
+      {showStorm && <LightningBolt />}
+      {showSnow && <SnowSystem />}
+    </View>
+  );
+};
+
+// ─── WEATHER ART (hero card center animation) ─────────────────────────────────
+export const WeatherArt = ({ artType, accent }) => {
+  const art = artType || 'cloudy';
+
+  if (art === 'sunny')
+    return (
+      <View style={s.artCenter}>
+        <Sun accent={accent} inSky={false} />
+      </View>
+    );
+
+  if (art === 'clearNight')
+    return (
+      <View style={s.artCenter}>
+        <Moon inSky={false} />
+      </View>
+    );
+
+  if (art === 'partlyCloudy')
+    return (
+      <View style={s.artCenter}>
+        <Sun accent={accent} inSky={false} />
+        <View style={{ position: 'absolute', bottom: 10, right: 10 }}>
+          <Cloud scale={0.72} opacity={0.88} color="#C8D8E8" shade="#8AAAC0" />
+        </View>
+      </View>
+    );
+
+  if (art === 'rain')
+    return (
+      <View style={s.artCenter}>
+        <Cloud scale={1.1} opacity={0.9} color="#6A8AA8" shade="#3A5A78" />
+        {arr(5).map(i => (
+          <View
+            key={i}
+            style={[
+              s.artRainDrop,
+              { left: 30 + i * 28, height: 14 + (i % 3) * 6 },
+            ]}
+          />
+        ))}
+      </View>
+    );
+
+  if (art === 'storm')
+    return (
+      <View style={s.artCenter}>
+        <Cloud scale={1.1} opacity={0.9} color="#3A4A58" shade="#1A2A38" />
+        <View style={s.artBoltWrap}>
+          <View style={s.artBoltTop} />
+          <View style={s.artBoltBot} />
+        </View>
+      </View>
+    );
+
+  if (art === 'snow')
+    return (
+      <View style={s.artCenter}>
+        <Cloud scale={1.0} opacity={0.85} color="#C0CCD8" shade="#8A9EB2" />
+        {arr(5).map(i => (
+          <View key={i} style={[s.artSnowflake, { left: 26 + i * 30 }]}>
+            <View style={s.artSnowH} />
+            <View style={s.artSnowV} />
+          </View>
+        ))}
+      </View>
+    );
+
+  if (art === 'fog')
+    return (
+      <View style={s.artCenter}>
+        {arr(4).map(i => (
+          <View
+            key={i}
+            style={[
+              s.artFogBar,
+              {
+                top: 38 + i * 22,
+                width: 120 - i * 14,
+                opacity: 0.45 - i * 0.06,
+              },
+            ]}
+          />
+        ))}
+      </View>
+    );
+
+  // Default: cloudy
+  return (
+    <View style={s.artCenter}>
+      <Cloud
+        scale={0.9}
+        opacity={0.78}
+        color="#5A7A98"
+        shade="#2A4A68"
+        style={{ marginBottom: -20 }}
+      />
+      <Cloud scale={1.05} opacity={0.88} color="#6A8AA8" shade="#3A5A78" />
     </View>
   );
 };
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  card: {
-    width: '100%',
-    height: CARD_H,
-    borderRadius: 28,
-    overflow: 'hidden',
-    backgroundColor: '#0A1525',
-    marginBottom: 14,
-  },
-  fill: { ...StyleSheet.absoluteFillObject },
-  absolute: { position: 'absolute' },
-
-  // sky atmosphere glow behind sun
-  skyGlow: {
-    position: 'absolute',
-    top: -40,
-    left: '30%',
-    width: '60%',
-    height: 160,
-    borderRadius: 100,
-    backgroundColor: 'rgba(250,200,80,0.07)',
-  },
-
-  // ── Sun ──
+  // Sun
   sunWrap: {
-    position: 'absolute',
-    top: 22,
-    left: '50%',
-    transform: [{ translateX: -55 }],
-    width: 110,
-    height: 110,
+    width: 120,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sunGlow: {
+  sunGlowOuter: {
     position: 'absolute',
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    opacity: 0.28,
+    width: 118,
+    height: 118,
+    borderRadius: 59,
+    borderWidth: 12,
+  },
+  sunGlowMid: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 8,
+  },
+  sunCore: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    shadowOpacity: 0.7,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
   raysWrap: {
     position: 'absolute',
-    width: 110,
-    height: 110,
+    width: 120,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ray: {
     position: 'absolute',
-    width: 4,
-    height: 20,
-    borderRadius: 3,
-    opacity: 0.78,
-  },
-  sunCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    shadowColor: '#FCD34D',
-    shadowOpacity: 0.55,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
+    width: 3.5,
+    height: 18,
+    borderRadius: 2,
+    opacity: 0.7,
   },
 
-  // ── Partly cloudy sun ──
-  partSunWrap: {
+  // Moon — sky version (small, top-right corner)
+  moonSkyWrap: {
     position: 'absolute',
-    top: 28,
-    right: 48,
-    width: 100,
-    height: 100,
+    right: 32,
+    top: 110, // well below status bar + header
+    width: 44,
+    height: 44,
+  },
+  // Moon — hero card version (larger, centered by parent)
+  moonHeroWrap: {
+    width: 90,
+    height: 90,
+    alignSelf: 'center',
+  },
+  moonHeroBody: {
+    position: 'absolute',
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#EEF2FF',
+    shadowColor: '#C8D0FF',
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  moonHeroMask: {
+    position: 'absolute',
+    right: -14,
+    top: 10,
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+  },
+
+  // Sun — sky version
+  sunSkyWrap: {
+    position: 'absolute',
+    left: width / 2 - 38,
+    top: 110, // below status bar + header safe zone
+    width: 76,
+    height: 76,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mainCloudWrap: {
+  sunSkyGlow: {
     position: 'absolute',
-    top: 58,
-    left: '5%',
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    borderWidth: 10,
   },
-
-  // ── Cloud shape ──
-  cloudWrap: {
-    position: 'relative',
-    width: 200,
-    height: 110,
-  },
-  cShadow: {
+  sunSkyRays: {
     position: 'absolute',
-    left: 16,
-    top: 65,
-    width: 164,
-    height: 40,
-    borderRadius: 24,
+    width: 76,
+    height: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sunSkyRay: {
+    position: 'absolute',
+    width: 2.5,
+    height: 11,
+    borderRadius: 2,
     opacity: 0.55,
   },
-  cBase: {
+  sunSkyCore: {
     position: 'absolute',
-    left: 16,
-    top: 58,
-    width: 168,
-    height: 46,
-    borderRadius: 26,
-  },
-  cBumpLeft: {
-    position: 'absolute',
-    left: 22,
-    top: 36,
-    width: 72,
-    height: 56,
-    borderRadius: 36,
-  },
-  cDomeTop: {
-    position: 'absolute',
-    left: 72,
-    top: 14,
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-  },
-  cBumpRight: {
-    position: 'absolute',
-    left: 122,
-    top: 38,
-    width: 58,
-    height: 50,
-    borderRadius: 30,
-  },
-  cShadeBar: {
-    position: 'absolute',
-    left: 32,
-    top: 84,
-    width: 120,
-    height: 10,
-    borderRadius: 6,
-    opacity: 0.45,
-  },
-
-  // ── Tiny cloud ──
-  tinyCloudWrap: { position: 'relative', width: 80, height: 44 },
-  tcBase: {
-    position: 'absolute',
-    left: 6,
-    top: 22,
-    width: 66,
-    height: 20,
-    borderRadius: 12,
-  },
-  tcDomeL: {
-    position: 'absolute',
-    left: 8,
-    top: 12,
-    width: 28,
-    height: 26,
-    borderRadius: 14,
-  },
-  tcDomeR: {
-    position: 'absolute',
-    left: 28,
-    top: 6,
-    width: 34,
-    height: 30,
-    borderRadius: 17,
-  },
-
-  // ── Rain ──
-  rainDrop: {
-    position: 'absolute',
-    top: -55,
-    width: 2,
-    borderRadius: 2,
-    backgroundColor: '#A8D8F0',
-  },
-
-  // ── Snow ──
-  snow: { position: 'absolute', top: -24, backgroundColor: '#EEF5FA' },
-
-  // ── Stars & moon ──
-  star: { position: 'absolute', backgroundColor: '#FFFFFF' },
-  shootingStar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 55,
-    height: 1.5,
-    borderRadius: 2,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#FFFFFF',
-    shadowOpacity: 0.9,
-    shadowRadius: 4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
     shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
+
+  // Moon (old - kept for safety, now unused)
   moonWrap: {
     position: 'absolute',
-    right: 38,
-    top: 32,
-    width: 62,
-    height: 62,
+    right: 36,
+    top: 28,
+    width: 58,
+    height: 58,
   },
   moonBody: {
     position: 'absolute',
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: '#F0F4FF',
-    shadowColor: '#C8D4FF',
-    shadowOpacity: 0.55,
-    shadowRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#EEF2FF',
+    shadowColor: '#C8D0FF',
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
   },
   moonMask: {
     position: 'absolute',
-    right: -10,
+    right: -8,
     top: 6,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#0C2040',
-  },
-
-  // ── Fog ──
-  fogBar: {
-    position: 'absolute',
-    left: -24,
-    height: 18,
+    width: 36,
+    height: 36,
     borderRadius: 18,
-    backgroundColor: '#D8E4EA',
   },
 
-  // ── Storm ──
-  flash: { ...StyleSheet.absoluteFillObject, backgroundColor: '#FFFFFF' },
+  // Cloud
+  cloudWrap: { position: 'relative', width: 200, height: 110 },
+  cShadow: {
+    position: 'absolute',
+    left: 16,
+    top: 68,
+    width: 164,
+    height: 38,
+    borderRadius: 22,
+    opacity: 0.45,
+  },
+  cBase: {
+    position: 'absolute',
+    left: 16,
+    top: 60,
+    width: 168,
+    height: 44,
+    borderRadius: 24,
+  },
+  cBumpL: {
+    position: 'absolute',
+    left: 22,
+    top: 38,
+    width: 70,
+    height: 52,
+    borderRadius: 34,
+  },
+  cDome: {
+    position: 'absolute',
+    left: 74,
+    top: 16,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+  },
+  cBumpR: {
+    position: 'absolute',
+    left: 122,
+    top: 40,
+    width: 56,
+    height: 48,
+    borderRadius: 28,
+  },
+  cShadeBar: {
+    position: 'absolute',
+    left: 32,
+    top: 86,
+    width: 118,
+    height: 9,
+    borderRadius: 5,
+    opacity: 0.35,
+  },
+
+  // Art center
+  artCenter: {
+    width: 200,
+    height: 150,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  artRainDrop: {
+    position: 'absolute',
+    bottom: 10,
+    width: 2.5,
+    borderRadius: 2,
+    backgroundColor: '#A8DCEF',
+    opacity: 0.8,
+  },
+  artBoltWrap: { position: 'absolute', bottom: 6, right: 58 },
+  artBoltTop: {
+    width: 14,
+    height: 40,
+    backgroundColor: '#FDE68A',
+    transform: [{ skewX: '-20deg' }, { rotate: '8deg' }],
+  },
+  artBoltBot: {
+    width: 14,
+    height: 36,
+    backgroundColor: '#FDE68A',
+    transform: [{ skewX: '-20deg' }, { rotate: '8deg' }],
+    marginLeft: -8,
+  },
+  artSnowflake: {
+    position: 'absolute',
+    bottom: 12,
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  artSnowH: {
+    position: 'absolute',
+    width: 16,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#C8DCEA',
+    opacity: 0.75,
+  },
+  artSnowV: {
+    position: 'absolute',
+    width: 3,
+    height: 16,
+    borderRadius: 1.5,
+    backgroundColor: '#C8DCEA',
+    opacity: 0.75,
+  },
+  artFogBar: {
+    position: 'absolute',
+    left: 16,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#C8D8E0',
+  },
+
+  // Lightning
   boltWrap: {
     position: 'absolute',
-    right: 58,
-    top: 62,
-    width: 48,
-    height: 80,
+    right: 60,
+    top: 70,
+    width: 44,
+    height: 76,
     zIndex: 2,
   },
   boltTop: {
-    position: 'absolute',
-    left: 18,
-    top: 0,
-    width: 16,
-    height: 44,
+    width: 14,
+    height: 40,
     backgroundColor: '#FDE68A',
-    transform: [{ skewX: '-22deg' }, { rotate: '10deg' }],
+    transform: [{ skewX: '-20deg' }, { rotate: '8deg' }],
+    position: 'absolute',
+    left: 16,
+    top: 0,
   },
   boltBottom: {
-    position: 'absolute',
-    left: 8,
-    top: 30,
-    width: 16,
-    height: 44,
+    width: 14,
+    height: 40,
     backgroundColor: '#FDE68A',
-    transform: [{ skewX: '-22deg' }, { rotate: '10deg' }],
-  },
-
-  // ── Full screen bg ──
-  bgFogBar: {
+    transform: [{ skewX: '-20deg' }, { rotate: '8deg' }],
     position: 'absolute',
-    left: -40,
-    top: 160,
-    width: width + 80,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#C8D4DA',
-  },
-  bgRainDrop: {
-    position: 'absolute',
-    top: -60,
-    width: 1.8,
-    borderRadius: 2,
-    backgroundColor: '#A8D0E8',
+    left: 6,
+    top: 30,
   },
 });
